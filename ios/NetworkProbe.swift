@@ -49,7 +49,7 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
   private var latencyResults: [Double] = []
   private var receivedBytes = 0
   private var reachedDownloadCap = false
-  private var startedAt = 0.0
+  private let startedAt: Double
   private var timeoutItem: DispatchWorkItem?
 
   init(
@@ -57,12 +57,14 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     downloadURL: URL?,
     latencySamples: Int,
     timeoutMs: Double,
+    startedAt: Double,
     completion: @escaping Completion
   ) {
     self.latencyURL = latencyURL
     self.downloadURL = downloadURL
     self.latencySamples = max(1, latencySamples)
-    self.timeoutMs = max(1, timeoutMs)
+    self.timeoutMs = timeoutMs
+    self.startedAt = startedAt
     self.completion = completion
     let delegateQueue = OperationQueue()
     delegateQueue.name = "com.rnnetworkquality.probe.delegate"
@@ -88,19 +90,23 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
   func start() {
     queue.async { [weak self] in
       guard let self else { return }
-      startedAt = Self.monotonicMilliseconds()
+      let remainingMs = timeoutMs - elapsedMilliseconds
+      guard remainingMs > 0 else {
+        handleWholeProbeTimeout()
+        return
+      }
       let timeout = DispatchWorkItem { [weak self] in
         self?.handleWholeProbeTimeout()
       }
       timeoutItem = timeout
-      queue.asyncAfter(deadline: .now() + timeoutMs / 1_000, execute: timeout)
+      queue.asyncAfter(deadline: .now() + remainingMs / 1_000, execute: timeout)
       startLatencyRequest(index: 0)
     }
   }
 
   func cancel() {
-    queue.async { [weak self] in
-      guard let self, !isFinished else { return }
+    queue.async { [self] in
+      guard !isFinished else { return }
       fail(
         code: "E_PROBE_FAILED",
         message: "The network probe was cancelled.",
@@ -275,7 +281,8 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
       Self.monotonicMilliseconds() - (responseHeadersAt ?? Self.monotonicMilliseconds())
     )
     let downlinkKbps: Double?
-    if downloadURL != nil,
+    if downloadError == nil,
+      downloadURL != nil,
       receivedBytes >= Self.minimumDownloadBytes,
       downloadDuration >= Self.minimumDownloadDurationMs
     {
@@ -337,7 +344,7 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     value ?? NSNull()
   }
 
-  private static func monotonicMilliseconds() -> Double {
+  static func monotonicMilliseconds() -> Double {
     Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000
   }
 }

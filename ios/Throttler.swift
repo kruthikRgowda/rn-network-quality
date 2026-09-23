@@ -48,6 +48,9 @@ final class Throttler {
   func update(throttleMs: Double, bandwidthChangeThresholdPct: Double) {
     self.throttleMs = max(0, throttleMs)
     self.bandwidthChangeThresholdPct = max(0, bandwidthChangeThresholdPct)
+    guard let pending else { return }
+    cancelPending()
+    submit(pending)
   }
 
   func submit(_ snapshot: [String: Any]) {
@@ -57,6 +60,7 @@ final class Throttler {
     }
 
     if Self.equalsIgnoringTimestamp(previous, snapshot) {
+      cancelPending()
       return
     }
 
@@ -76,7 +80,10 @@ final class Throttler {
         thresholdPct: bandwidthChangeThresholdPct
       )
     }
-    guard crossesThreshold else { return }
+    guard crossesThreshold else {
+      cancelPending()
+      return
+    }
 
     let now = clock()
     let elapsed = now - lastEmitTime

@@ -1,6 +1,12 @@
 import Foundation
 import Network
 
+private enum PathLookupResult {
+  case path(NWPath)
+  case timedOut
+  case cancelled
+}
+
 @objc(NetworkQualityImpl)
 public final class NetworkQualityImpl: NSObject {
   @objc public var onChange: (([String: Any]) -> Void)?
@@ -39,12 +45,19 @@ public final class NetworkQualityImpl: NSObject {
         return
       }
 
-      withOneShotPath { [weak self] path, _ in
+      withOneShotPath(timeoutMs: 2_000) { [weak self] result in
         guard let self else { return }
-        if let path {
+        switch result {
+        case let .path(path):
           resolve(PathSnapshot.make(path: path, cellularInfo: cellularInfo))
-        } else {
+        case .timedOut:
           resolve(PathSnapshot.unknownDisconnected())
+        case .cancelled:
+          reject(
+            "E_PROBE_FAILED",
+            "The network state request was cancelled because monitoring stopped.",
+            nil
+          )
         }
       }
     }
@@ -99,6 +112,7 @@ public final class NetworkQualityImpl: NSObject {
     resolve: @escaping (Any?) -> Void,
     reject: @escaping (String?, String?, Error?) -> Void
   ) {
+    let probeStartedAt = NetworkProbe.monotonicMilliseconds()
     guard let latencyURL = NetworkProbe.validatedURL(latencyUrl) else {
       reject("E_INVALID_URL", "latencyUrl must be a valid HTTP or HTTPS URL.", nil)
       return
@@ -146,17 +160,42 @@ public final class NetworkQualityImpl: NSObject {
         reject("E_PROBE_FAILED", "NetworkQuality has been invalidated.", nil)
         return
       }
-      currentPath { [weak self] path, wasCancelled in
+      let pathBudgetMs = timeoutValue
+        - (NetworkProbe.monotonicMilliseconds() - probeStartedAt)
+      guard pathBudgetMs > 0 else {
+        reject("E_PROBE_TIMEOUT", "The network path check exceeded the probe timeout.", nil)
+        return
+      }
+      currentPath(timeoutMs: pathBudgetMs) { [weak self] result in
         guard let self else { return }
         guard !invalidated else {
           reject("E_PROBE_FAILED", "NetworkQuality has been invalidated.", nil)
           return
         }
-        guard !wasCancelled else {
+
+        let path: NWPath
+        switch result {
+        case let .path(value):
+          path = value
+        case .timedOut:
+          reject(
+            "E_PROBE_TIMEOUT",
+            "The network path check exceeded the probe timeout.",
+            nil
+          )
+          return
+        case .cancelled:
           reject("E_PROBE_FAILED", "The network probe was cancelled.", nil)
           return
         }
-        guard let path, path.status == .satisfied else {
+
+        guard
+          NetworkProbe.monotonicMilliseconds() - probeStartedAt < timeoutValue
+        else {
+          reject("E_PROBE_TIMEOUT", "The network path check exceeded the probe timeout.", nil)
+          return
+        }
+        guard path.status == .satisfied else {
           reject("E_OFFLINE", "No connected network is available for probing.", nil)
           return
         }
@@ -166,7 +205,8 @@ public final class NetworkQualityImpl: NSObject {
           latencyURL: latencyURL,
           downloadURL: downloadURL,
           latencySamples: Int(latencySampleValue),
-          timeoutMs: max(1, timeoutValue)
+          timeoutMs: timeoutValue,
+          startedAt: probeStartedAt
         ) { [weak self] result in
           self?.queue.async {
             self?.activeProbes.removeValue(forKey: identifier)
@@ -231,51 +271,57 @@ public final class NetworkQualityImpl: NSObject {
     activeProbes.values.forEach { $0.cancel() }
     activeProbes.removeAll()
     Array(activeOneShots.keys).forEach {
-      finishOneShot($0, path: nil, wasCancelled: true)
+      finishOneShot($0, result: .cancelled)
     }
   }
 
   private func currentPath(
-    completion: @escaping (NWPath?, Bool) -> Void
+    timeoutMs: Double,
+    completion: @escaping (PathLookupResult) -> Void
   ) {
     if let monitor {
-      completion(monitor.currentPath, false)
+      completion(.path(monitor.currentPath))
     } else {
-      withOneShotPath(completion: completion)
+      withOneShotPath(timeoutMs: timeoutMs, completion: completion)
     }
   }
 
   private func withOneShotPath(
-    completion: @escaping (NWPath?, Bool) -> Void
+    timeoutMs: Double,
+    completion: @escaping (PathLookupResult) -> Void
   ) {
     let oneShot = NWPathMonitor()
     let identifier = UUID()
+    let timeoutItem = DispatchWorkItem { [weak self] in
+      self?.finishOneShot(identifier, result: .timedOut)
+    }
     activeOneShots[identifier] = OneShotRequest(
       monitor: oneShot,
+      timeoutItem: timeoutItem,
       completion: completion
     )
 
     oneShot.pathUpdateHandler = { [weak self] path in
-      self?.finishOneShot(identifier, path: path, wasCancelled: false)
+      self?.finishOneShot(identifier, result: .path(path))
     }
     oneShot.start(queue: queue)
-
-    queue.asyncAfter(deadline: .now() + 2) { [weak self] in
-      self?.finishOneShot(identifier, path: nil, wasCancelled: false)
-    }
+    queue.asyncAfter(
+      deadline: .now() + max(0, timeoutMs) / 1_000,
+      execute: timeoutItem
+    )
   }
 
   private func finishOneShot(
     _ identifier: UUID,
-    path: NWPath?,
-    wasCancelled: Bool
+    result: PathLookupResult
   ) {
     guard let request = activeOneShots.removeValue(forKey: identifier) else {
       return
     }
     request.monitor.pathUpdateHandler = nil
     request.monitor.cancel()
-    request.completion(path, wasCancelled)
+    request.timeoutItem.cancel()
+    request.completion(result)
   }
 
   private func performSynchronouslyOnQueue(_ action: () -> Void) {
@@ -289,5 +335,6 @@ public final class NetworkQualityImpl: NSObject {
 
 private struct OneShotRequest {
   let monitor: NWPathMonitor
-  let completion: (NWPath?, Bool) -> Void
+  let timeoutItem: DispatchWorkItem
+  let completion: (PathLookupResult) -> Void
 }
