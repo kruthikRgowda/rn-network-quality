@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: Semver increment or Conventional Commit recommendation
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+          - prerelease
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up project
+        uses: ./.github/actions/setup
+      - name: Configure npm registry
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org/
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@12.1.0
+      - run: yarn lint
+      - run: yarn typecheck
+      - run: yarn test --runInBand
+      - run: yarn codegen:check
+      - run: yarn prepare
+      - run: yarn pack:check
+      - name: Configure release author
+        run: |
+          git config user.name kruthik
+          git config user.email kruthikbr2@gmail.com
+      - name: Release from Conventional Commits
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          increment='${{ inputs.increment }}'
+          current_version="$(node -p "require('./package.json').version")"
+          if ! git describe --tags --match 'v[0-9]*' --abbrev=0 >/dev/null 2>&1 && [[ "$increment" == 'auto' ]]; then
+            # The repository starts at 0.1.0. Publish that exact version before
+            # Conventional Commits drives subsequent increments.
+            yarn release --ci --no-increment
+          elif [[ "$increment" == 'auto' ]]; then
+            recommended_version="$(yarn release --release-version)"
+            if [[ -z "$recommended_version" ]]; then
+              echo 'No releasable Conventional Commits were found.'
+            elif [[ "${current_version%%.*}" == '0' && "${recommended_version%%.*}" != '0' ]]; then
+              # Before 1.0, a Conventional Commit breaking change bumps minor.
+              yarn release minor --ci
+            else
+              yarn release "$recommended_version" --ci
+            fi
+          elif [[ "$increment" == 'prerelease' ]]; then
+            if [[ "$current_version" == *-* ]]; then
+              yarn release prerelease --ci --preRelease=beta
+            else
+              recommended_version="$(yarn release --release-version)"
+              if [[ -z "$recommended_version" ]]; then
+                current_core="${current_version%%-*}"
+                IFS='.' read -r current_major current_minor current_patch <<< "$current_core"
+                recommended_version="$current_major.$current_minor.$((current_patch + 1))"
+              elif [[ "${current_version%%.*}" == '0' && "${recommended_version%%.*}" != '0' ]]; then
+                current_core="${current_version%%-*}"
+                current_minor_patch="${current_core#*.}"
+                current_minor="${current_minor_patch%%.*}"
+                recommended_version="0.$((current_minor + 1)).0"
+              fi
+              yarn release "${recommended_version%%-*}-beta.0" --ci --preRelease=beta
+            fi
+          else
+            yarn release "$increment" --ci
+          fi
