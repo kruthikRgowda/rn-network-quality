@@ -390,6 +390,20 @@ describe('NetworkQualityManager configuration', () => {
 });
 
 describe('NetworkQualityManager probes', () => {
+  it('refreshes a cold snapshot before capturing probe transport', async () => {
+    const context = createManager(snapshot({ transport: 'cellular' }));
+
+    const result = await context.manager.probeNetwork();
+
+    expect(context.getCurrentState).toHaveBeenCalledTimes(1);
+    expect(context.probe).toHaveBeenCalledTimes(1);
+    expect(context.getCurrentState.mock.invocationCallOrder[0]).toBeLessThan(
+      context.probe.mock.invocationCallOrder[0] as number
+    );
+    expect(result.transport).toBe('cellular');
+    expect(context.manager.getCachedState()?.lastProbe).toBe(result);
+  });
+
   it('uses a per-call result TTL when classifying the completed probe', async () => {
     const now = jest.spyOn(Date, 'now').mockReturnValue(2_000_500);
     const context = createManager();
@@ -404,6 +418,56 @@ describe('NetworkQualityManager probes', () => {
     });
     subscription.remove();
     now.mockRestore();
+  });
+
+  it('reclassifies and emits when a fresh probe reaches its TTL', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(2_000_000);
+    try {
+      const context = createManager();
+      const listener = jest.fn();
+      const subscription = context.manager.addNetworkQualityListener(listener);
+      context.emitNative(snapshot());
+
+      await context.manager.probeNetwork({ resultTtlMs: 100 });
+      expect(context.manager.getCachedState()).toMatchObject({
+        quality: 'excellent',
+        qualitySource: 'probe',
+      });
+      listener.mockClear();
+
+      jest.advanceTimersByTime(100);
+      expect(listener).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(context.manager.getCachedState()).toMatchObject({
+        quality: 'unknown',
+        qualitySource: 'none',
+        reasons: expect.arrayContaining(['probe stale (expired)']),
+      });
+
+      subscription.remove();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('clears a pending probe-expiry timer with the final listener', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(2_000_000);
+    try {
+      const context = createManager();
+      const subscription = context.manager.addNetworkQualityListener(jest.fn());
+      context.emitNative(snapshot());
+
+      await context.manager.probeNetwork({ resultTtlMs: 1_000 });
+      expect(jest.getTimerCount()).toBe(1);
+
+      subscription.remove();
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('de-duplicates concurrent probes and captures transport before native work', async () => {
@@ -476,6 +540,7 @@ describe('NetworkQualityManager probes', () => {
     context.probe.mockRejectedValueOnce(existing);
     await expect(context.manager.probeNetwork()).rejects.toBe(existing);
 
+    context.emitNative(snapshot());
     context.probe.mockImplementationOnce(() => {
       throw { code: 'E_INVALID_URL', message: 'invalid' };
     });

@@ -158,7 +158,9 @@ internal class NetworkProbe(context: Context) {
           options.downloadUrl,
           deadlineNanos,
           operation,
-        )
+        ) { received ->
+          bytesReceived = received
+        }
         bytesReceived = download.bytesReceived
         downlinkKbps = download.downlinkKbps
       } catch (error: Exception) {
@@ -255,6 +257,7 @@ internal class NetworkProbe(context: Context) {
     url: URL,
     deadlineNanos: Long,
     operation: ProbeOperation,
+    onBytesReceived: (Long) -> Unit,
   ): DownloadMeasurement {
     ensureWithinDeadline(deadlineNanos, operation)
     val connection = openConnection(network, url, deadlineNanos, operation)
@@ -272,9 +275,10 @@ internal class NetworkProbe(context: Context) {
             connection.readTimeout = remainingTimeoutMs(deadlineNanos)
             val allowed = minOf(buffer.size.toLong(), MAX_DOWNLOAD_BYTES - total).toInt()
             val count = stream.read(buffer, 0, allowed)
-            ensureWithinDeadline(deadlineNanos, operation)
             if (count < 0) break
             total += count
+            onBytesReceived(total)
+            ensureWithinDeadline(deadlineNanos, operation)
           }
         }
       }

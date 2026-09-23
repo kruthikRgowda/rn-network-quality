@@ -24,6 +24,7 @@ const MIN_AUTO_PROBE_INTERVAL_MS = 15_000;
 const TRANSPORT_CHANGE_DEBOUNCE_MS = 2_000;
 const MAX_LATENCY_SAMPLES = 100;
 const MAX_NATIVE_TIMEOUT_MS = 2_147_483_647;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const SUPPORTED_ERROR_CODES = new Set<NetworkQualityErrorCode>([
   'E_UNSUPPORTED',
   'E_OFFLINE',
@@ -321,6 +322,7 @@ export class NetworkQualityManager {
   private lastProbe: ProbeResult | null = null;
   private lastProbeResultTtlMs: number | null = null;
   private inFlightProbe: Promise<ProbeResult> | null = null;
+  private probeExpiry: ReturnType<typeof setTimeout> | null = null;
   private autoProbeInterval: ReturnType<typeof setInterval> | null = null;
   private transportDebounce: ReturnType<typeof setTimeout> | null = null;
   private appStateStatus: string | null | undefined;
@@ -373,6 +375,7 @@ export class NetworkQualityManager {
     listener: (state: NetworkQualityState) => void
   ): RemovableSubscription {
     const nativeModule = this.requireNativeModule();
+    if (this.listeners.size === 0) this.reclassifyCachedSnapshot();
     const record: ListenerRecord = { active: true, listener };
     const hadCachedState = this.cachedState !== null;
     const versionAtSubscription = this.stateVersion;
@@ -385,12 +388,14 @@ export class NetworkQualityManager {
             this.acceptNativeSnapshot(snapshot);
           }
         );
+        this.scheduleProbeExpiry();
         this.refreshAutoProbeLifecycle();
         nativeModule.startMonitoring(this.nativeMonitorOptions());
       } catch (error) {
         this.nativeSubscription?.remove();
         this.nativeSubscription = null;
         this.listeners.delete(record);
+        this.clearProbeExpiry();
         this.stopAutoProbeLifecycle();
         throw error;
       }
@@ -416,6 +421,7 @@ export class NetworkQualityManager {
         if (this.listeners.size === 0) {
           this.nativeSubscription?.remove();
           this.nativeSubscription = null;
+          this.clearProbeExpiry();
           this.stopAutoProbeLifecycle();
           nativeModule.stopMonitoring();
         }
@@ -432,7 +438,6 @@ export class NetworkQualityManager {
 
     const probeConfig = { ...this.config.probe, ...options };
     validateProbeConfig(probeConfig);
-    const transport = this.latestSnapshot?.transport ?? 'unknown';
     const nativeOptions: NativeProbeOptions = {
       latencyUrl: probeConfig.latencyUrl,
       downloadUrl: probeConfig.downloadUrl,
@@ -440,9 +445,18 @@ export class NetworkQualityManager {
       timeoutMs: probeConfig.timeoutMs,
     };
 
+    let transport: ProbeResult['transport'] = 'unknown';
     let nativeProbe: Promise<NativeProbeResult>;
     try {
-      nativeProbe = nativeModule.probe(nativeOptions);
+      if (this.latestSnapshot !== null) {
+        transport = this.latestSnapshot.transport;
+        nativeProbe = nativeModule.probe(nativeOptions);
+      } else {
+        nativeProbe = nativeModule.getCurrentState().then((snapshot) => {
+          transport = this.acceptNativeSnapshot(snapshot).transport;
+          return nativeModule.probe(nativeOptions);
+        });
+      }
     } catch (error) {
       throw wrapProbeError(error);
     }
@@ -454,6 +468,7 @@ export class NetworkQualityManager {
         this.lastProbe = probeResult;
         this.lastProbeResultTtlMs = probeConfig.resultTtlMs;
         this.reclassifyCachedSnapshot();
+        this.scheduleProbeExpiry();
         return probeResult;
       })
       .catch((error: unknown) => {
@@ -497,6 +512,7 @@ export class NetworkQualityManager {
     this.latestSnapshot = snapshot;
     const state = this.buildState(snapshot);
     const acceptedState = this.acceptState(state);
+    this.scheduleProbeExpiry();
 
     if (
       previousTransport !== undefined &&
@@ -544,6 +560,38 @@ export class NetworkQualityManager {
   private reclassifyCachedSnapshot(): void {
     if (this.latestSnapshot !== null) {
       this.acceptState(this.buildState(this.latestSnapshot));
+    }
+  }
+
+  private scheduleProbeExpiry(): void {
+    this.clearProbeExpiry();
+    const probe = this.lastProbe;
+    const snapshot = this.latestSnapshot;
+    const resultTtlMs = this.lastProbeResultTtlMs;
+    if (
+      this.listeners.size === 0 ||
+      probe === null ||
+      snapshot === null ||
+      resultTtlMs === null ||
+      probe.transport !== snapshot.transport
+    ) {
+      return;
+    }
+
+    const remainingMs = probe.timestamp + resultTtlMs - Date.now();
+    if (remainingMs < 0) return;
+    const delayMs = Math.min(remainingMs + 1, MAX_TIMER_DELAY_MS);
+    this.probeExpiry = setTimeout(() => {
+      this.probeExpiry = null;
+      this.reclassifyCachedSnapshot();
+      this.scheduleProbeExpiry();
+    }, delayMs);
+  }
+
+  private clearProbeExpiry(): void {
+    if (this.probeExpiry !== null) {
+      clearTimeout(this.probeExpiry);
+      this.probeExpiry = null;
     }
   }
 

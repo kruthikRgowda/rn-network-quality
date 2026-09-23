@@ -252,7 +252,7 @@ export default function App() {
         [
           {
             id: nextLogId.current++,
-            timestamp: state.timestamp,
+            timestamp: Date.now(),
             changed,
           },
           ...current,

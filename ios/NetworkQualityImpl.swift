@@ -28,7 +28,7 @@ public final class NetworkQualityImpl: NSObject {
     queue.async { [weak self] in
       guard let self else { return }
       guard !invalidated else {
-        reject("E_STATE_FAILED", "NetworkQuality has been invalidated.", nil)
+        reject("E_PROBE_FAILED", "NetworkQuality has been invalidated.", nil)
         return
       }
       if let monitor {

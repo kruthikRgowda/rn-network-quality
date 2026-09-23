@@ -124,9 +124,9 @@ export interface ProbeConfig {
   latencyUrl: string;
   /** HTTP(S) payload endpoint, or `null` to skip throughput measurement. */
   downloadUrl: string | null;
-  /** Number of retained latency samples, excluding one warm-up request. */
+  /** Retained latency samples (1–100), excluding one warm-up request. */
   latencySamples: number;
-  /** Whole-probe timeout in milliseconds. */
+  /** Positive whole-probe timeout in milliseconds, capped at 2,147,483,647. */
   timeoutMs: number;
   /** Time for which a result may influence classification. */
   resultTtlMs: number;

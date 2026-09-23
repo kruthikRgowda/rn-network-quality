@@ -169,6 +169,25 @@ describe('useNetworkProbe', () => {
     });
   });
 
+  it('normalizes synchronous option validation failures', async () => {
+    const validationError = new TypeError('latencySamples is invalid');
+    mockProbeNetwork.mockImplementationOnce(() => {
+      throw validationError;
+    });
+    const { result } = renderHook(() => useNetworkProbe());
+
+    await act(async () => {
+      await expect(result.current.probe()).rejects.toMatchObject({
+        code: 'E_PROBE_FAILED',
+        cause: validationError,
+      });
+    });
+    expect(result.current.error).toMatchObject({
+      code: 'E_PROBE_FAILED',
+      cause: validationError,
+    });
+  });
+
   it('ignores completion after unmount', async () => {
     const pending = deferred<ProbeResult>();
     mockProbeNetwork.mockReturnValueOnce(pending.promise);
