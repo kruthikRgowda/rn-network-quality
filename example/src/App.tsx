@@ -1,12 +1,11 @@
 import { Text, View, StyleSheet } from 'react-native';
-import { multiply } from 'rn-network-quality';
-
-const result = multiply(3, 7);
+import { DEFAULT_CONFIG } from 'rn-network-quality';
 
 export default function App() {
   return (
     <View style={styles.container}>
-      <Text>Result: {result}</Text>
+      <Text>Network Quality</Text>
+      <Text>Default throttle: {DEFAULT_CONFIG.throttleMs} ms</Text>
     </View>
   );
 }

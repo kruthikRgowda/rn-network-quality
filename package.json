@@ -35,6 +35,7 @@
     "example": "yarn workspace rn-network-quality-example",
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
+    "test": "jest",
     "typecheck": "tsc",
     "lint": "eslint \"**/*.{js,ts,tsx}\""
   },
@@ -62,16 +63,22 @@
     "@eslint/js": "^9.39.5",
     "@react-native/babel-preset": "0.87.1",
     "@react-native/eslint-config": "0.86.2",
+    "@react-native/jest-preset": "0.87.1",
+    "@testing-library/react-native": "13.3.3",
+    "@types/jest": "30.0.0",
     "@types/react": "^19.2.0",
+    "@types/react-test-renderer": "^19",
     "del-cli": "^7.0.0",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-ft-flow": "^3.0.11",
     "eslint-plugin-prettier": "^5.5.6",
+    "jest": "29.7.0",
     "prettier": "^3.9.6",
     "react": "19.2.3",
     "react-native": "0.87.1",
     "react-native-builder-bob": "^0.43.1",
+    "react-test-renderer": "19.2.3",
     "turbo": "^2.10.8",
     "typescript": "^6.0.3"
   },
@@ -102,11 +109,19 @@
     ]
   },
   "codegenConfig": {
-    "name": "RnNetworkQualitySpec",
+    "name": "RNNetworkQualitySpec",
     "type": "modules",
     "jsSrcsDir": "src",
     "android": {
       "javaPackageName": "com.rnnetworkquality"
+    },
+    "ios": {
+      "modules": {
+        "NetworkQuality": {
+          "className": "NetworkQuality",
+          "unstableRequiresMainQueueSetup": false
+        }
+      }
     }
   },
   "prettier": {
