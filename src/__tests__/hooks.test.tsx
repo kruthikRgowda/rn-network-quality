@@ -49,6 +49,7 @@ function state(): NetworkQualityState {
     effectiveDownlinkKbps: 5_000,
     effectiveRttMs: null,
     lastProbe: null,
+    lastProbeFailure: null,
     reasons: ['downlink 5000 kbps → good'],
   };
 }

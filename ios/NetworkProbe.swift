@@ -15,13 +15,15 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     case finished
   }
 
-  private static let maximumDownloadBytes = 5 * 1_024 * 1_024
-  private static let minimumDownloadBytes = 32 * 1_024
+  private static let minimumDownloadBytes = 64 * 1_024
+  private static let minimumDownloadDurationMs = 100.0
 
   private let latencyURL: URL
   private let downloadURL: URL?
   private let latencySamples: Int
   private let timeoutMs: Double
+  private let downloadMaxDurationMs: Double
+  private let downloadMaxBytes: Int
   private let completion: Completion
   private let queue = DispatchQueue(label: "com.rnnetworkquality.probe")
   private let delegateQueue: OperationQueue
@@ -47,15 +49,20 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
   private var metricRttByTask: [Int: Double] = [:]
   private var latencyResults: [Double] = []
   private var receivedBytes = 0
-  private var reachedDownloadCap = false
+  private var downloadFirstByteAt: Double?
+  private var downloadFinishedAt: Double?
+  private var reachedDownloadLimit = false
   private let startedAt: Double
   private var timeoutItem: DispatchWorkItem?
+  private var downloadTimeoutItem: DispatchWorkItem?
 
   init(
     latencyURL: URL,
     downloadURL: URL?,
     latencySamples: Int,
     timeoutMs: Double,
+    downloadMaxDurationMs: Double,
+    downloadMaxBytes: Int,
     startedAt: Double,
     completion: @escaping Completion
   ) {
@@ -63,6 +70,8 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     self.downloadURL = downloadURL
     self.latencySamples = max(1, latencySamples)
     self.timeoutMs = timeoutMs
+    self.downloadMaxDurationMs = downloadMaxDurationMs
+    self.downloadMaxBytes = downloadMaxBytes
     self.startedAt = startedAt
     self.completion = completion
     let delegateQueue = OperationQueue()
@@ -130,15 +139,30 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     didReceive data: Data
   ) {
     guard case .download = phase else { return }
-    let remaining = Self.maximumDownloadBytes - receivedBytes
+    let receivedAt = Self.monotonicMilliseconds()
+    if downloadFirstByteAt == nil {
+      downloadFirstByteAt = receivedAt
+      let timeout = DispatchWorkItem { [weak self] in
+        self?.handleDownloadTimeLimit()
+      }
+      downloadTimeoutItem = timeout
+      queue.asyncAfter(
+        deadline: .now() + downloadMaxDurationMs / 1_000,
+        execute: timeout
+      )
+    }
+
+    let remaining = downloadMaxBytes - receivedBytes
     if remaining <= 0 {
-      reachedDownloadCap = true
+      reachedDownloadLimit = true
+      downloadFinishedAt = receivedAt
       dataTask.cancel()
       return
     }
     receivedBytes += min(remaining, data.count)
-    if receivedBytes >= Self.maximumDownloadBytes {
-      reachedDownloadCap = true
+    downloadFinishedAt = receivedAt
+    if receivedBytes >= downloadMaxBytes {
+      reachedDownloadLimit = true
       dataTask.cancel()
     }
   }
@@ -197,7 +221,7 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
       }
 
     case .download:
-      if let error, !reachedDownloadCap {
+      if let error, !reachedDownloadLimit {
         finish(downloadError: error.localizedDescription)
       } else {
         finish(downloadError: nil)
@@ -224,7 +248,9 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     }
     phase = .download
     receivedBytes = 0
-    reachedDownloadCap = false
+    downloadFirstByteAt = nil
+    downloadFinishedAt = nil
+    reachedDownloadLimit = false
     startRequest(url: downloadURL)
   }
 
@@ -273,16 +299,29 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     }
   }
 
+  private func handleDownloadTimeLimit() {
+    guard case .download = phase, !isFinished else { return }
+    reachedDownloadLimit = true
+    downloadFinishedAt = Self.monotonicMilliseconds()
+    activeTask?.cancel()
+  }
+
   private func finish(downloadError: String?) {
     guard !isFinished else { return }
-    let downloadDuration = max(
-      0,
-      Self.monotonicMilliseconds() - (responseHeadersAt ?? Self.monotonicMilliseconds())
-    )
+    downloadTimeoutItem?.cancel()
+    let finishedAt = downloadFinishedAt ?? Self.monotonicMilliseconds()
+    let downloadDuration = max(0, finishedAt - (downloadFirstByteAt ?? finishedAt))
+    var resolvedDownloadError = downloadError
+    if resolvedDownloadError == nil, downloadURL != nil {
+      if receivedBytes < Self.minimumDownloadBytes {
+        resolvedDownloadError = "too-little-data"
+      } else if downloadDuration < Self.minimumDownloadDurationMs {
+        resolvedDownloadError = "too-fast-to-measure"
+      }
+    }
     let downlinkKbps: Double?
-    if downloadError == nil,
+    if resolvedDownloadError == nil,
       downloadURL != nil,
-      receivedBytes >= Self.minimumDownloadBytes,
       downloadDuration > 0
     {
       downlinkKbps = Double(receivedBytes) * 8 / downloadDuration
@@ -295,7 +334,7 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
       "downlinkKbps": Self.nullable(downlinkKbps),
       "bytesReceived": receivedBytes,
       "durationMs": elapsedMilliseconds,
-      "downloadError": Self.nullable(downloadError),
+      "downloadError": Self.nullable(resolvedDownloadError),
       "timestamp": Date().timeIntervalSince1970 * 1_000,
     ]
     complete(.success(result))
@@ -309,6 +348,7 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     guard !isFinished else { return }
     phase = .finished
     timeoutItem?.cancel()
+    downloadTimeoutItem?.cancel()
     activeTask?.cancel()
     session.invalidateAndCancel()
     completion(result)

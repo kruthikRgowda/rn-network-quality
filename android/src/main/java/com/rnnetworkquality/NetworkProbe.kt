@@ -155,7 +155,7 @@ internal class NetworkProbe(context: Context) {
       try {
         val download = measureThroughput(
           network,
-          options.downloadUrl,
+          options,
           deadlineNanos,
           operation,
         ) { received ->
@@ -163,6 +163,7 @@ internal class NetworkProbe(context: Context) {
         }
         bytesReceived = download.bytesReceived
         downlinkKbps = download.downlinkKbps
+        downloadError = download.downloadError
       } catch (error: Exception) {
         downloadError = if (isTimeout(error, deadlineNanos, operation)) {
           "Download phase timed out"
@@ -254,42 +255,91 @@ internal class NetworkProbe(context: Context) {
 
   private fun measureThroughput(
     network: Network,
-    url: URL,
+    options: ProbeOptions,
     deadlineNanos: Long,
     operation: ProbeOperation,
     onBytesReceived: (Long) -> Unit,
   ): DownloadMeasurement {
     ensureWithinDeadline(deadlineNanos, operation)
-    val connection = openConnection(network, url, deadlineNanos, operation)
+    val downloadUrl = requireNotNull(options.downloadUrl)
+    val connection = openConnection(network, downloadUrl, deadlineNanos, operation)
     try {
-      val timing = receiveResponseHeaders(connection, deadlineNanos, operation)
-      val bodyStarted = timing.receivedNanos
       connection.readTimeout = remainingTimeoutMs(deadlineNanos)
+      receiveResponseHeaders(connection, deadlineNanos, operation)
       val input = responseStream(connection)
       var total = 0L
+      var firstByteAtNanos: Long? = null
+      var finishedAtNanos = SystemClock.elapsedRealtimeNanos()
       if (input != null) {
         input.use { stream ->
           val buffer = ByteArray(BUFFER_SIZE)
-          while (total < MAX_DOWNLOAD_BYTES) {
+          while (true) {
             ensureWithinDeadline(deadlineNanos, operation)
-            connection.readTimeout = remainingTimeoutMs(deadlineNanos)
-            val allowed = minOf(buffer.size.toLong(), MAX_DOWNLOAD_BYTES - total).toInt()
-            val count = stream.read(buffer, 0, allowed)
+            val nowNanos = SystemClock.elapsedRealtimeNanos()
+            val bodyStarted = firstByteAtNanos
+            if (
+              bodyStarted != null &&
+              DownloadPolicy.shouldStop(
+                total,
+                nanosToMilliseconds(nowNanos - bodyStarted),
+                options.downloadMaxBytes,
+                options.downloadMaxDurationMs,
+              )
+            ) {
+              finishedAtNanos = nowNanos
+              break
+            }
+
+            connection.readTimeout = if (bodyStarted == null) {
+              remainingTimeoutMs(deadlineNanos)
+            } else {
+              minOf(
+                remainingTimeoutMs(deadlineNanos),
+                remainingDownloadTimeoutMs(bodyStarted, options.downloadMaxDurationMs),
+              )
+            }
+            val allowed = minOf(
+              buffer.size.toLong(),
+              options.downloadMaxBytes - total,
+            ).toInt()
+            if (allowed <= 0) {
+              finishedAtNanos = nowNanos
+              break
+            }
+            val count = try {
+              stream.read(buffer, 0, allowed)
+            } catch (error: SocketTimeoutException) {
+              val started = firstByteAtNanos
+              if (
+                started != null &&
+                nanosToMilliseconds(SystemClock.elapsedRealtimeNanos() - started) >=
+                options.downloadMaxDurationMs
+              ) {
+                finishedAtNanos = SystemClock.elapsedRealtimeNanos()
+                break
+              }
+              throw error
+            }
             if (count < 0) break
+            val receivedAtNanos = SystemClock.elapsedRealtimeNanos()
+            if (firstByteAtNanos == null) firstByteAtNanos = receivedAtNanos
             total += count
+            finishedAtNanos = receivedAtNanos
             onBytesReceived(total)
             ensureWithinDeadline(deadlineNanos, operation)
           }
         }
       }
-      val elapsedMs = nanosToMilliseconds(SystemClock.elapsedRealtimeNanos() - bodyStarted)
-      val measuredKbps = if (total >= MIN_DOWNLOAD_BYTES && elapsedMs >= MIN_DOWNLOAD_DURATION_MS) {
-        total * 8.0 / elapsedMs
+      val bodyStarted = firstByteAtNanos
+      val elapsedMs = if (bodyStarted == null) {
+        0.0
       } else {
-        null
+        nanosToMilliseconds(finishedAtNanos - bodyStarted)
       }
+      val downloadError = DownloadPolicy.measurementError(total, elapsedMs)
+      val measuredKbps = DownloadPolicy.throughputKbps(total, elapsedMs)
       ensureWithinDeadline(deadlineNanos, operation)
-      return DownloadMeasurement(total, measuredKbps)
+      return DownloadMeasurement(total, measuredKbps, downloadError)
     } finally {
       operation.clearConnection(connection)
       // Throughput is the final request, so explicitly close its socket after the body/cap.
@@ -398,6 +448,19 @@ internal class NetworkProbe(context: Context) {
       .coerceAtLeast(1)
   }
 
+  private fun remainingDownloadTimeoutMs(
+    firstByteAtNanos: Long,
+    maximumDurationMs: Long,
+  ): Int {
+    val elapsedNanos = SystemClock.elapsedRealtimeNanos() - firstByteAtNanos
+    val remainingNanos = maximumDurationMs * NANOS_PER_MILLISECOND - elapsedNanos
+    if (remainingNanos <= 0L) return 1
+    return ceil(remainingNanos.toDouble() / NANOS_PER_MILLISECOND)
+      .coerceAtMost(Int.MAX_VALUE.toDouble())
+      .toInt()
+      .coerceAtLeast(1)
+  }
+
   private fun ensureWithinDeadline(deadlineNanos: Long, operation: ProbeOperation) {
     if (operation.hasTimedOut || SystemClock.elapsedRealtimeNanos() >= deadlineNanos) {
       throw ProbeTimeoutException()
@@ -426,6 +489,8 @@ internal class NetworkProbe(context: Context) {
     }
     val latencySamplesValue = options.getDouble("latencySamples")
     val timeoutValue = options.getDouble("timeoutMs")
+    val downloadMaxDurationValue = options.getDouble("downloadMaxDurationMs")
+    val downloadMaxBytesValue = options.getDouble("downloadMaxBytes")
     require(latencySamplesValue.isFinite() && latencySamplesValue % 1.0 == 0.0) {
       "latencySamples must be an integer"
     }
@@ -436,7 +501,29 @@ internal class NetworkProbe(context: Context) {
     require(timeoutValue.isFinite() && timeoutValue > 0 && timeoutValue <= Int.MAX_VALUE) {
       "timeoutMs must be greater than 0 and at most ${Int.MAX_VALUE}"
     }
-    return ProbeOptions(latencyUrl, downloadUrl, latencySamples, ceil(timeoutValue).toLong())
+    require(
+      downloadMaxDurationValue.isFinite() &&
+        downloadMaxDurationValue > 0 &&
+        downloadMaxDurationValue <= Int.MAX_VALUE
+    ) {
+      "downloadMaxDurationMs must be greater than 0 and at most ${Int.MAX_VALUE}"
+    }
+    require(
+      downloadMaxBytesValue.isFinite() &&
+        downloadMaxBytesValue % 1.0 == 0.0 &&
+        downloadMaxBytesValue > 0 &&
+        downloadMaxBytesValue <= Int.MAX_VALUE
+    ) {
+      "downloadMaxBytes must be an integer between 1 and ${Int.MAX_VALUE}"
+    }
+    return ProbeOptions(
+      latencyUrl,
+      downloadUrl,
+      latencySamples,
+      ceil(timeoutValue).toLong(),
+      ceil(downloadMaxDurationValue).toLong(),
+      downloadMaxBytesValue.toLong(),
+    )
   }
 
   private fun parseHttpUrl(rawValue: String?, optionName: String): URL {
@@ -478,11 +565,14 @@ internal class NetworkProbe(context: Context) {
     val downloadUrl: URL?,
     val latencySamples: Int,
     val timeoutMs: Long,
+    val downloadMaxDurationMs: Long,
+    val downloadMaxBytes: Long,
   )
 
   private data class DownloadMeasurement(
     val bytesReceived: Long,
     val downlinkKbps: Double?,
+    val downloadError: String?,
   )
 
   private data class HeaderTiming(
@@ -573,9 +663,6 @@ internal class NetworkProbe(context: Context) {
     private const val ERROR_PROBE_FAILED = "E_PROBE_FAILED"
     private const val NANOS_PER_MILLISECOND = 1_000_000L
     private const val BUFFER_SIZE = 16 * 1024
-    private const val MIN_DOWNLOAD_BYTES = 32 * 1024L
-    private const val MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024L
-    private const val MIN_DOWNLOAD_DURATION_MS = 50.0
     private const val MAX_LATENCY_SAMPLES = 100
   }
 }

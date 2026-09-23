@@ -1,6 +1,7 @@
 import { DEFAULT_CONFIG, QUALITY_ORDER } from './constants';
 import type {
   NetworkQuality,
+  NetworkQualityClassificationContext,
   NetworkQualityConfig,
   NetworkQualityState,
   NetworkSnapshot,
@@ -18,7 +19,8 @@ type Classification = Pick<
   | 'reasons'
 >;
 
-type ClassifierConfig = Pick<NetworkQualityConfig, 'thresholds' | 'probe'>;
+type ClassifierConfig = Pick<NetworkQualityConfig, 'thresholds' | 'probe'> &
+  Partial<Pick<NetworkQualityConfig, 'validationGraceMs'>>;
 type MetricQuality = Exclude<NetworkQuality, 'unknown' | 'offline'>;
 
 function formatValue(value: number): string {
@@ -52,12 +54,13 @@ function worseQuality(
 }
 
 function forcedClassification(
-  quality: 'offline' | 'poor',
-  reason: string
+  quality: 'unknown' | 'offline' | 'poor',
+  reason: string,
+  qualitySource: QualitySource = 'none'
 ): Classification {
   return {
     quality,
-    qualitySource: 'none',
+    qualitySource,
     effectiveDownlinkKbps: null,
     effectiveRttMs: null,
     reasons: [reason],
@@ -72,7 +75,8 @@ export function classifyNetworkQuality(
   snapshot: NetworkSnapshot,
   probe: ProbeResult | null,
   config: ClassifierConfig = DEFAULT_CONFIG,
-  now: number = Date.now()
+  now: number = Date.now(),
+  context: NetworkQualityClassificationContext = {}
 ): Classification {
   if (!snapshot.isConnected) {
     return forcedClassification('offline', 'not-connected');
@@ -80,7 +84,32 @@ export function classifyNetworkQuality(
   if (snapshot.isCaptivePortal === true) {
     return forcedClassification('poor', 'captive-portal');
   }
+
+  const failure = context.lastProbeFailure ?? null;
+  const failureTtlMs = context.probeFailureTtlMs ?? config.probe.resultTtlMs;
+  if (
+    failure !== null &&
+    failure.transport === snapshot.transport &&
+    now - failure.timestamp <= failureTtlMs &&
+    (probe === null || failure.timestamp > probe.timestamp)
+  ) {
+    return forcedClassification(
+      'poor',
+      `probe failed: ${failure.code}`,
+      'probe'
+    );
+  }
+
   if (snapshot.isValidated === false) {
+    const networkChangedAt = context.networkChangedAt ?? null;
+    const validationGraceMs =
+      config.validationGraceMs ?? DEFAULT_CONFIG.validationGraceMs;
+    if (
+      networkChangedAt !== null &&
+      now - networkChangedAt < validationGraceMs
+    ) {
+      return forcedClassification('unknown', 'validating');
+    }
     return forcedClassification('poor', 'not-validated');
   }
 
@@ -89,7 +118,10 @@ export function classifyNetworkQuality(
   if (probe !== null) {
     if (probe.transport !== snapshot.transport) {
       reasons.push('probe stale (transport changed)');
-    } else if (now - probe.timestamp > config.probe.resultTtlMs) {
+    } else if (
+      now - probe.timestamp >
+      (context.probeResultTtlMs ?? config.probe.resultTtlMs)
+    ) {
       reasons.push('probe stale (expired)');
     } else {
       freshProbe = probe;

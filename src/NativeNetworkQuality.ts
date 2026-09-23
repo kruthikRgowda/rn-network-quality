@@ -34,6 +34,8 @@ export type NativeProbeOptions = {
   downloadUrl: string | null;
   latencySamples: number;
   timeoutMs: number;
+  downloadMaxDurationMs: number;
+  downloadMaxBytes: number;
 };
 
 export type NativeProbeResult = {

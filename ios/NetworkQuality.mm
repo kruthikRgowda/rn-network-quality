@@ -63,6 +63,8 @@
                  downloadUrl:options.downloadUrl()
               latencySamples:@(options.latencySamples())
                    timeoutMs:@(options.timeoutMs())
+       downloadMaxDurationMs:@(options.downloadMaxDurationMs())
+            downloadMaxBytes:@(options.downloadMaxBytes())
                      resolve:resolve
                       reject:reject];
 }

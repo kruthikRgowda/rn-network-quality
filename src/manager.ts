@@ -16,6 +16,7 @@ import type {
   NetworkQualityErrorCode,
   NetworkQualityState,
   NetworkSnapshot,
+  ProbeFailure,
   ProbeConfig,
   ProbeResult,
 } from './types';
@@ -96,6 +97,10 @@ function mergeConfig(
       patch.bandwidthChangeThresholdPct,
       current.bandwidthChangeThresholdPct
     ),
+    validationGraceMs: valueOrCurrent(
+      patch.validationGraceMs,
+      current.validationGraceMs
+    ),
     thresholds: {
       excellent: {
         minDownlinkKbps: valueOrCurrent(
@@ -144,6 +149,14 @@ function mergeConfig(
       timeoutMs: valueOrCurrent(
         patch.probe?.timeoutMs,
         current.probe.timeoutMs
+      ),
+      downloadMaxDurationMs: valueOrCurrent(
+        patch.probe?.downloadMaxDurationMs,
+        current.probe.downloadMaxDurationMs
+      ),
+      downloadMaxBytes: valueOrCurrent(
+        patch.probe?.downloadMaxBytes,
+        current.probe.downloadMaxBytes
       ),
       resultTtlMs: valueOrCurrent(
         patch.probe?.resultTtlMs,
@@ -215,6 +228,26 @@ function validateProbeConfig(config: ProbeConfig): void {
       `probe.timeoutMs must be at most ${MAX_NATIVE_TIMEOUT_MS}`
     );
   }
+  assertFiniteNumber(
+    config.downloadMaxDurationMs,
+    'probe.downloadMaxDurationMs',
+    0,
+    true
+  );
+  if (config.downloadMaxDurationMs > MAX_NATIVE_TIMEOUT_MS) {
+    throw new TypeError(
+      `probe.downloadMaxDurationMs must be at most ${MAX_NATIVE_TIMEOUT_MS}`
+    );
+  }
+  if (
+    !Number.isInteger(config.downloadMaxBytes) ||
+    config.downloadMaxBytes <= 0 ||
+    config.downloadMaxBytes > MAX_NATIVE_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      `probe.downloadMaxBytes must be an integer between 1 and ${MAX_NATIVE_TIMEOUT_MS}`
+    );
+  }
   assertFiniteNumber(config.resultTtlMs, 'probe.resultTtlMs', 0);
 }
 
@@ -225,6 +258,12 @@ function validateConfig(config: NetworkQualityConfig): NetworkQualityConfig {
     'bandwidthChangeThresholdPct',
     0
   );
+  assertFiniteNumber(config.validationGraceMs, 'validationGraceMs', 0);
+  if (config.validationGraceMs > MAX_TIMER_DELAY_MS) {
+    throw new TypeError(
+      `validationGraceMs must be at most ${MAX_TIMER_DELAY_MS}`
+    );
+  }
 
   const { excellent, good, moderate } = config.thresholds;
   for (const [name, threshold] of Object.entries(config.thresholds)) {
@@ -320,9 +359,13 @@ export class NetworkQualityManager {
   private latestSnapshot: NetworkSnapshot | null = null;
   private cachedState: NetworkQualityState | null = null;
   private lastProbe: ProbeResult | null = null;
+  private lastProbeFailure: ProbeFailure | null = null;
   private lastProbeResultTtlMs: number | null = null;
+  private lastProbeFailureTtlMs: number | null = null;
+  private networkChangedAt: number | null = null;
   private inFlightProbe: Promise<ProbeResult> | null = null;
   private probeExpiry: ReturnType<typeof setTimeout> | null = null;
+  private validationGraceExpiry: ReturnType<typeof setTimeout> | null = null;
   private autoProbeInterval: ReturnType<typeof setInterval> | null = null;
   private transportDebounce: ReturnType<typeof setTimeout> | null = null;
   private appStateStatus: string | null | undefined;
@@ -350,6 +393,7 @@ export class NetworkQualityManager {
     const nextConfig = validateConfig(mergeConfig(this.config, patch));
     this.config = cloneConfig(nextConfig);
     this.reclassifyCachedSnapshot();
+    this.scheduleValidationGraceExpiry();
 
     if (this.listeners.size > 0) {
       this.refreshAutoProbeLifecycle();
@@ -390,6 +434,7 @@ export class NetworkQualityManager {
           }
         );
         this.scheduleProbeExpiry();
+        this.scheduleValidationGraceExpiry();
         this.refreshAutoProbeLifecycle();
         nativeModule.startMonitoring(this.nativeMonitorOptions());
       } catch (error) {
@@ -397,6 +442,7 @@ export class NetworkQualityManager {
         this.nativeSubscription = null;
         this.listeners.delete(record);
         this.clearProbeExpiry();
+        this.clearValidationGraceExpiry();
         this.stopAutoProbeLifecycle();
         throw error;
       }
@@ -423,6 +469,7 @@ export class NetworkQualityManager {
           this.nativeSubscription?.remove();
           this.nativeSubscription = null;
           this.clearProbeExpiry();
+          this.clearValidationGraceExpiry();
           this.stopAutoProbeLifecycle();
           this.monitoringStopVersion += 1;
           nativeModule.stopMonitoring();
@@ -445,6 +492,8 @@ export class NetworkQualityManager {
       downloadUrl: probeConfig.downloadUrl,
       latencySamples: probeConfig.latencySamples,
       timeoutMs: probeConfig.timeoutMs,
+      downloadMaxDurationMs: probeConfig.downloadMaxDurationMs,
+      downloadMaxBytes: probeConfig.downloadMaxBytes,
     };
     const stopVersionAtStart = this.monitoringStopVersion;
 
@@ -467,7 +516,9 @@ export class NetworkQualityManager {
         });
       }
     } catch (error) {
-      throw wrapProbeError(error);
+      const wrapped = wrapProbeError(error);
+      this.recordProbeFailure(wrapped, transport, probeConfig.resultTtlMs);
+      throw wrapped;
     }
 
     let managedProbe: Promise<ProbeResult>;
@@ -475,13 +526,17 @@ export class NetworkQualityManager {
       .then((result) => {
         const probeResult: ProbeResult = { ...result, transport };
         this.lastProbe = probeResult;
+        this.lastProbeFailure = null;
+        this.lastProbeFailureTtlMs = null;
         this.lastProbeResultTtlMs = probeConfig.resultTtlMs;
         this.reclassifyCachedSnapshot();
         this.scheduleProbeExpiry();
         return probeResult;
       })
       .catch((error: unknown) => {
-        throw wrapProbeError(error);
+        const wrapped = wrapProbeError(error);
+        this.recordProbeFailure(wrapped, transport, probeConfig.resultTtlMs);
+        throw wrapped;
       })
       .finally(() => {
         if (this.inFlightProbe === managedProbe) this.inFlightProbe = null;
@@ -517,11 +572,25 @@ export class NetworkQualityManager {
     nativeSnapshot: NativeNetworkSnapshot
   ): NetworkQualityState {
     const snapshot = normalizeSnapshot(nativeSnapshot);
-    const previousTransport = this.latestSnapshot?.transport;
+    const previousSnapshot = this.latestSnapshot;
+    const previousTransport = previousSnapshot?.transport;
+    const networkChanged =
+      previousSnapshot === null ||
+      previousSnapshot.isConnected !== snapshot.isConnected ||
+      previousSnapshot.transport !== snapshot.transport;
+    const transportChanged =
+      previousSnapshot !== null &&
+      previousSnapshot.transport !== snapshot.transport;
+    if (networkChanged) this.networkChangedAt = Date.now();
+    if (transportChanged) {
+      this.lastProbeFailure = null;
+      this.lastProbeFailureTtlMs = null;
+    }
     this.latestSnapshot = snapshot;
     const state = this.buildState(snapshot);
     const acceptedState = this.acceptState(state);
     this.scheduleProbeExpiry();
+    this.scheduleValidationGraceExpiry();
 
     if (
       previousTransport !== undefined &&
@@ -545,8 +614,20 @@ export class NetworkQualityManager {
           };
     return {
       ...snapshot,
-      ...classifyNetworkQuality(snapshot, this.lastProbe, classifierConfig),
+      ...classifyNetworkQuality(
+        snapshot,
+        this.lastProbe,
+        classifierConfig,
+        Date.now(),
+        {
+          lastProbeFailure: this.lastProbeFailure,
+          networkChangedAt: this.networkChangedAt,
+          probeResultTtlMs: this.lastProbeResultTtlMs ?? undefined,
+          probeFailureTtlMs: this.lastProbeFailureTtlMs ?? undefined,
+        }
+      ),
       lastProbe: this.lastProbe,
+      lastProbeFailure: this.lastProbeFailure,
     };
   }
 
@@ -574,22 +655,35 @@ export class NetworkQualityManager {
 
   private scheduleProbeExpiry(): void {
     this.clearProbeExpiry();
-    const probe = this.lastProbe;
     const snapshot = this.latestSnapshot;
-    const resultTtlMs = this.lastProbeResultTtlMs;
-    if (
-      this.listeners.size === 0 ||
-      probe === null ||
-      snapshot === null ||
-      resultTtlMs === null ||
-      probe.transport !== snapshot.transport
-    ) {
-      return;
-    }
+    if (this.listeners.size === 0 || snapshot === null) return;
 
-    const remainingMs = probe.timestamp + resultTtlMs - Date.now();
-    if (remainingMs < 0) return;
-    const delayMs = Math.min(remainingMs + 1, MAX_TIMER_DELAY_MS);
+    const expirations: number[] = [];
+    if (
+      this.lastProbe !== null &&
+      this.lastProbeResultTtlMs !== null &&
+      this.lastProbe.transport === snapshot.transport
+    ) {
+      expirations.push(
+        this.lastProbe.timestamp + this.lastProbeResultTtlMs + 1
+      );
+    }
+    if (
+      this.lastProbeFailure !== null &&
+      this.lastProbeFailureTtlMs !== null &&
+      this.lastProbeFailure.transport === snapshot.transport
+    ) {
+      expirations.push(
+        this.lastProbeFailure.timestamp + this.lastProbeFailureTtlMs + 1
+      );
+    }
+    const now = Date.now();
+    const futureExpirations = expirations.filter(
+      (expiration) => expiration > now
+    );
+    if (futureExpirations.length === 0) return;
+    const remainingMs = Math.min(...futureExpirations) - now;
+    const delayMs = Math.min(remainingMs, MAX_TIMER_DELAY_MS);
     this.probeExpiry = setTimeout(() => {
       this.probeExpiry = null;
       this.reclassifyCachedSnapshot();
@@ -602,6 +696,58 @@ export class NetworkQualityManager {
       clearTimeout(this.probeExpiry);
       this.probeExpiry = null;
     }
+  }
+
+  private scheduleValidationGraceExpiry(): void {
+    this.clearValidationGraceExpiry();
+    const snapshot = this.latestSnapshot;
+    const networkChangedAt = this.networkChangedAt;
+    if (
+      snapshot === null ||
+      networkChangedAt === null ||
+      !snapshot.isConnected ||
+      snapshot.isValidated !== false ||
+      snapshot.isCaptivePortal === true
+    ) {
+      return;
+    }
+
+    const remainingMs =
+      networkChangedAt + this.config.validationGraceMs - Date.now();
+    if (remainingMs <= 0) return;
+    this.validationGraceExpiry = setTimeout(
+      () => {
+        this.validationGraceExpiry = null;
+        this.reclassifyCachedSnapshot();
+      },
+      Math.min(remainingMs, MAX_TIMER_DELAY_MS)
+    );
+  }
+
+  private clearValidationGraceExpiry(): void {
+    if (this.validationGraceExpiry !== null) {
+      clearTimeout(this.validationGraceExpiry);
+      this.validationGraceExpiry = null;
+    }
+  }
+
+  private recordProbeFailure(
+    error: NetworkQualityError,
+    transport: ProbeFailure['transport'],
+    resultTtlMs: number
+  ): void {
+    if (error.code !== 'E_PROBE_FAILED' && error.code !== 'E_PROBE_TIMEOUT') {
+      return;
+    }
+    this.lastProbeFailure = {
+      code: error.code,
+      message: error.message,
+      transport,
+      timestamp: Date.now(),
+    };
+    this.lastProbeFailureTtlMs = resultTtlMs;
+    this.reclassifyCachedSnapshot();
+    this.scheduleProbeExpiry();
   }
 
   private refreshAutoProbeLifecycle(): void {

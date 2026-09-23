@@ -368,6 +368,9 @@ describe('NetworkQualityManager configuration', () => {
     [{ probe: { latencySamples: 101 } }, 'latencySamples'],
     [{ probe: { timeoutMs: 0 } }, 'timeoutMs'],
     [{ probe: { timeoutMs: 2_147_483_648 } }, 'timeoutMs'],
+    [{ probe: { downloadMaxDurationMs: 0 } }, 'downloadMaxDurationMs'],
+    [{ probe: { downloadMaxBytes: 1.5 } }, 'downloadMaxBytes'],
+    [{ validationGraceMs: -1 }, 'validationGraceMs'],
     [{ probe: { resultTtlMs: -1 } }, 'resultTtlMs'],
     [{ autoProbe: { intervalMs: -1 } }, 'intervalMs'],
     [{ autoProbe: { enabled: 'yes' } }, 'enabled'],
@@ -518,6 +521,8 @@ describe('NetworkQualityManager probes', () => {
       downloadUrl: null,
       latencySamples: 5,
       timeoutMs: 3_000,
+      downloadMaxDurationMs: 3_000,
+      downloadMaxBytes: 3_000_000,
     });
 
     pending.resolve(nativeProbeResult({ rttMs: 200 }));
@@ -572,6 +577,122 @@ describe('NetworkQualityManager probes', () => {
         cause: expect.anything(),
       })
     );
+  });
+
+  it('records a failed probe and notifies listeners', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(2_000_100);
+    const context = createManager();
+    const listener = jest.fn();
+    const subscription = context.manager.addNetworkQualityListener(listener);
+    context.emitNative(snapshot({ downlinkKbps: 25_000 }));
+    listener.mockClear();
+    context.probe.mockRejectedValueOnce({
+      code: 'E_PROBE_TIMEOUT',
+      message: 'probe timed out',
+    });
+
+    await expect(context.manager.probeNetwork()).rejects.toMatchObject({
+      code: 'E_PROBE_TIMEOUT',
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(context.manager.getCachedState()).toMatchObject({
+      quality: 'poor',
+      qualitySource: 'probe',
+      lastProbeFailure: {
+        code: 'E_PROBE_TIMEOUT',
+        message: 'probe timed out',
+        transport: 'wifi',
+        timestamp: 2_000_100,
+      },
+      reasons: ['probe failed: E_PROBE_TIMEOUT'],
+    });
+
+    await context.manager.probeNetwork();
+    expect(context.manager.getCachedState()?.lastProbeFailure).toBeNull();
+    subscription.remove();
+    jest.restoreAllMocks();
+  });
+
+  it('clears a recorded failure when the transport changes', async () => {
+    const context = createManager();
+    const subscription = context.manager.addNetworkQualityListener(jest.fn());
+    context.emitNative(snapshot({ transport: 'wifi' }));
+    context.probe.mockRejectedValueOnce({
+      code: 'E_PROBE_FAILED',
+      message: 'unreachable',
+    });
+    await context.manager.probeNetwork().catch(() => undefined);
+    expect(context.manager.getCachedState()?.lastProbeFailure).not.toBeNull();
+
+    context.emitNative(snapshot({ transport: 'cellular' }));
+    expect(context.manager.getCachedState()?.lastProbeFailure).toBeNull();
+    subscription.remove();
+  });
+
+  it('reclassifies when a recorded failure reaches its TTL', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(2_000_000);
+    try {
+      const context = createManager();
+      const listener = jest.fn();
+      const subscription = context.manager.addNetworkQualityListener(listener);
+      context.emitNative(snapshot({ downlinkKbps: 5_000 }));
+      context.probe.mockRejectedValueOnce({
+        code: 'E_PROBE_FAILED',
+        message: 'unreachable',
+      });
+
+      await context.manager
+        .probeNetwork({ resultTtlMs: 100 })
+        .catch(() => undefined);
+      expect(context.manager.getCachedState()?.quality).toBe('poor');
+      listener.mockClear();
+
+      jest.advanceTimersByTime(100);
+      expect(listener).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(context.manager.getCachedState()).toMatchObject({
+        quality: 'good',
+        qualitySource: 'os-estimate',
+      });
+      subscription.remove();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('NetworkQualityManager validation grace period', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(2_000_000);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('reclassifies an unvalidated connection when the grace timer expires', () => {
+    const context = createManager();
+    const listener = jest.fn();
+    const subscription = context.manager.addNetworkQualityListener(listener);
+    context.emitNative(snapshot({ isValidated: false }));
+
+    expect(context.manager.getCachedState()).toMatchObject({
+      quality: 'unknown',
+      reasons: ['validating'],
+    });
+    listener.mockClear();
+    jest.advanceTimersByTime(DEFAULT_CONFIG.validationGraceMs - 1);
+    expect(listener).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(context.manager.getCachedState()).toMatchObject({
+      quality: 'poor',
+      reasons: ['not-validated'],
+    });
+    subscription.remove();
   });
 });
 

@@ -250,7 +250,7 @@ import { probeNetwork } from 'rn-network-quality';
 
 const result = await probeNetwork({
   latencyUrl: 'https://network.example.com/204',
-  downloadUrl: 'https://network.example.com/probe-1500kb.bin',
+  downloadUrl: 'https://network.example.com/probe-3mb.bin',
   timeoutMs: 6_000,
 });
 
@@ -473,6 +473,7 @@ console.log(DEFAULT_CONFIG.throttleMs, QUALITY_ORDER.indexOf('good'));
 | `UnsatisfiedReason`       | iOS unsatisfied-path reason                 | `'wifiDenied'`                             |
 | `NetworkSnapshot`         | Raw normalized OS signals                   | `{ ...snapshot }`                          |
 | `ProbeResult`             | Active-probe measurements                   | `{ rttMs: 42, ... }`                       |
+| `ProbeFailure`            | Failed-probe code, message, transport, time | `{ code: 'E_PROBE_TIMEOUT', ... }`         |
 | `NetworkQualityState`     | Snapshot plus classification                | `{ quality: 'good', ... }`                 |
 | `TierThreshold`           | One tier's bandwidth and RTT bounds         | `{ minDownlinkKbps: 5000, maxRttMs: 150 }` |
 | `QualityThresholds`       | Excellent, good, and moderate bounds        | `{ excellent, good, moderate }`            |
@@ -497,6 +498,7 @@ does not reset its siblings. `getConfig()` returns a defensive copy.
 | -------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------- |
 | `throttleMs`                           | `1000`                                              | Minimum interval for minor native numeric updates                    |
 | `bandwidthChangeThresholdPct`          | `10`                                                | Percentage movement required for bandwidth or signal updates         |
+| `validationGraceMs`                    | `10000`                                             | Grace time before a newly connected unvalidated network is `poor`    |
 | `thresholds.excellent.minDownlinkKbps` | `20000`                                             | Excellent minimum downstream rate                                    |
 | `thresholds.excellent.maxRttMs`        | `50`                                                | Excellent maximum round-trip time                                    |
 | `thresholds.good.minDownlinkKbps`      | `5000`                                              | Good minimum downstream rate                                         |
@@ -504,9 +506,11 @@ does not reset its siblings. `getConfig()` returns a defensive copy.
 | `thresholds.moderate.minDownlinkKbps`  | `1000`                                              | Moderate minimum downstream rate                                     |
 | `thresholds.moderate.maxRttMs`         | `400`                                               | Moderate maximum round-trip time                                     |
 | `probe.latencyUrl`                     | `https://www.gstatic.com/generate_204`              | Latency endpoint                                                     |
-| `probe.downloadUrl`                    | `https://speed.cloudflare.com/__down?bytes=1500000` | Throughput payload endpoint; `null` disables this phase              |
+| `probe.downloadUrl`                    | `https://speed.cloudflare.com/__down?bytes=3000000` | Throughput payload endpoint; `null` disables this phase              |
 | `probe.latencySamples`                 | `3`                                                 | Retained requests after one warm-up                                  |
 | `probe.timeoutMs`                      | `8000`                                              | Whole-probe time budget                                              |
+| `probe.downloadMaxDurationMs`          | `3000`                                              | Download time cap after the first response byte                      |
+| `probe.downloadMaxBytes`               | `3000000`                                           | Maximum response-body bytes consumed by one probe                    |
 | `probe.resultTtlMs`                    | `60000`                                             | How long same-transport probe data influences quality                |
 | `autoProbe.enabled`                    | `false`                                             | Whether scheduled probing is active                                  |
 | `autoProbe.intervalMs`                 | `60000`                                             | Scheduled interval, clamped to at least `15000`                      |
@@ -515,7 +519,9 @@ does not reset its siblings. `getConfig()` returns a defensive copy.
 | `autoProbe.allowOnConstrained`         | `false`                                             | Permit automatic traffic while Data Saver or Low Data Mode is active |
 
 Durations and thresholds must be finite and non-negative;
-`probe.timeoutMs` must be positive and no greater than `2_147_483_647`;
+`probe.timeoutMs` and `probe.downloadMaxDurationMs` must be positive and no
+greater than `2_147_483_647`; `probe.downloadMaxBytes` must be a positive
+integer no greater than that value;
 `probe.latencySamples` must be an integer from 1 through 100; probe URLs must be
 non-empty strings; and automatic-probe flags must be booleans. URL scheme and
 parseability are checked when a probe is started.
@@ -550,6 +556,7 @@ measurement.
 | `effectiveDownlinkKbps` | `number \| null`             | Downlink value actually used for classification                                   |
 | `effectiveRttMs`        | `number \| null`             | RTT value actually used for classification                                        |
 | `lastProbe`             | `ProbeResult \| null`        | Most recent successful active probe                                               |
+| `lastProbeFailure`      | `ProbeFailure \| null`       | Most recent failed probe, cleared by success or a transport change                |
 | `reasons`               | `string[]`                   | Human-readable classifier decisions                                               |
 
 `ProbeResult` has its own measurement metadata:
@@ -615,16 +622,21 @@ diagnostic value rather than compared across transport types.
 Classification is deterministic and follows this order:
 
 1. A disconnected snapshot is `offline` with source `none`.
-2. A captive portal or explicitly unvalidated network is `poor`.
-3. A probe is fresh only while it is within `resultTtlMs` and was measured on
+2. A captive portal is `poor` immediately.
+3. A fresh same-transport probe failure newer than the last success is `poor`
+   with source `probe`. A successful probe or transport change clears it.
+4. A newly connected but unvalidated network is `unknown` with reason
+   `validating` for `validationGraceMs`; it becomes `poor` if validation does
+   not arrive before the grace period ends.
+5. A probe is fresh only while it is within `resultTtlMs` and was measured on
    the current transport. A stale probe is ignored and the reason is recorded.
-4. Fresh probe downlink takes priority over Android's OS estimate. Probe RTT is
+6. Fresh probe downlink takes priority over Android's OS estimate. Probe RTT is
    used when present.
-5. Each available metric is tiered independently. When bandwidth and RTT
+7. Each available metric is tiered independently. When bandwidth and RTT
    disagree, the worse tier wins.
-6. If no measurements exist, 4G/5G maps to `good`, 3G to `moderate`, and 2G to
+8. If no measurements exist, 4G/5G maps to `good`, 3G to `moderate`, and 2G to
    `poor`, with source `heuristic`.
-7. If no measurement or cellular heuristic is available, quality is `unknown`.
+9. If no measurement or cellular heuristic is available, quality is `unknown`.
 
 When a fresh probe has no usable downlink value, Android's OS downlink estimate
 is used as a fallback while the fresh RTT is still considered. `qualitySource`
@@ -657,10 +669,10 @@ Probing is opt-in. Calling `probeNetwork()` performs:
 
 1. One warm-up request followed by three retained latency requests by default.
    The reported RTT is the median of retained samples.
-2. One optional download capped at 5 MB. Measurements smaller than 32 KB leave
-   `downlinkKbps` as `null`. Android also rejects downloads shorter than 50 ms;
-   iOS accepts any positive measurable body duration so fast connections still
-   produce a throughput value.
+2. One optional download that stops after the first configured limit: 3 MB or
+   three seconds after the first byte by default. Both platforms require at
+   least 64 KB over at least 100 ms; otherwise `downlinkKbps` is `null` and
+   `downloadError` is `too-little-data` or `too-fast-to-measure`.
 3. A whole-operation timeout, eight seconds by default.
 
 Requests use random `_nq` cache-busting query values, `Cache-Control: no-cache`,
@@ -677,10 +689,10 @@ mutates that handler.
 
 The default latency endpoint is
 `https://www.gstatic.com/generate_204`. The default throughput endpoint is
-`https://speed.cloudflare.com/__down?bytes=1500000`. A default probe downloads
-about 1.5 MB plus four small latency responses and protocol overhead. Endpoint
-operators can observe ordinary request metadata such as source IP and headers;
-the library adds no user identifier or telemetry.
+`https://speed.cloudflare.com/__down?bytes=3000000`. A default probe downloads
+up to about 3 MB plus four small latency responses and protocol overhead.
+Endpoint operators can observe ordinary request metadata such as source IP and
+headers; the library adds no user identifier or telemetry.
 
 For full control, self-host an HTTP(S) endpoint that returns an empty `204`
 response and a static download of known size, then configure both URLs:
@@ -691,7 +703,9 @@ import { configure } from 'rn-network-quality';
 configure({
   probe: {
     latencyUrl: 'https://network.example.com/204',
-    downloadUrl: 'https://network.example.com/probe-1500kb.bin',
+    downloadUrl: 'https://network.example.com/probe-3mb.bin',
+    downloadMaxDurationMs: 3_000,
+    downloadMaxBytes: 3_000_000,
   },
 });
 ```
@@ -854,11 +868,10 @@ hardware.
 ### A probe has RTT but no downlink result
 
 Read `downloadError` for a timeout, transport error, or rejected endpoint. If it
-is `null`, the response may have contained fewer than 32 KB. Android also leaves
-downloads completed in under 50 ms as `null`; iOS only requires a positive
-measurable body duration. These cases are not treated as request failures, and
-latency remains valid by design. Confirm the URL is HTTP(S), returns a body, and
-is accessible from the device.
+is `too-little-data`, fewer than 64 KB arrived; `too-fast-to-measure` means the
+configured byte cap arrived in under 100 ms. These cases are not treated as
+request failures, and latency remains valid by design. Confirm the URL is
+HTTP(S), returns at least `downloadMaxBytes`, and is accessible from the device.
 
 ### State is not emitted for every tiny signal change
 

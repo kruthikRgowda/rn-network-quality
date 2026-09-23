@@ -103,12 +103,14 @@ public final class NetworkQualityImpl: NSObject {
     }
   }
 
-  @objc(probeWithLatencyUrl:downloadUrl:latencySamples:timeoutMs:resolve:reject:)
+  @objc(probeWithLatencyUrl:downloadUrl:latencySamples:timeoutMs:downloadMaxDurationMs:downloadMaxBytes:resolve:reject:)
   public func probe(
     latencyUrl: String,
     downloadUrl: String?,
     latencySamples: NSNumber,
     timeoutMs: NSNumber,
+    downloadMaxDurationMs: NSNumber,
+    downloadMaxBytes: NSNumber,
     resolve: @escaping (Any?) -> Void,
     reject: @escaping (String?, String?, Error?) -> Void
   ) {
@@ -149,6 +151,33 @@ public final class NetworkQualityImpl: NSObject {
       reject(
         "E_PROBE_FAILED",
         "timeoutMs must be greater than 0 and at most 2147483647.",
+        nil
+      )
+      return
+    }
+    let downloadMaxDurationValue = downloadMaxDurationMs.doubleValue
+    guard
+      downloadMaxDurationValue.isFinite,
+      downloadMaxDurationValue > 0,
+      downloadMaxDurationValue <= 2_147_483_647
+    else {
+      reject(
+        "E_PROBE_FAILED",
+        "downloadMaxDurationMs must be greater than 0 and at most 2147483647.",
+        nil
+      )
+      return
+    }
+    let downloadMaxBytesValue = downloadMaxBytes.doubleValue
+    guard
+      downloadMaxBytesValue.isFinite,
+      downloadMaxBytesValue.rounded(.towardZero) == downloadMaxBytesValue,
+      downloadMaxBytesValue > 0,
+      downloadMaxBytesValue <= 2_147_483_647
+    else {
+      reject(
+        "E_PROBE_FAILED",
+        "downloadMaxBytes must be an integer between 1 and 2147483647.",
         nil
       )
       return
@@ -206,6 +235,8 @@ public final class NetworkQualityImpl: NSObject {
           downloadURL: downloadURL,
           latencySamples: Int(latencySampleValue),
           timeoutMs: timeoutValue,
+          downloadMaxDurationMs: downloadMaxDurationValue,
+          downloadMaxBytes: Int(downloadMaxBytesValue),
           startedAt: probeStartedAt
         ) { [weak self] result in
           self?.queue.async {

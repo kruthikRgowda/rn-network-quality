@@ -4,6 +4,7 @@ import type { NetworkQuality, NetworkQualityConfig } from './types';
 export const DEFAULT_CONFIG: NetworkQualityConfig = {
   throttleMs: 1_000,
   bandwidthChangeThresholdPct: 10,
+  validationGraceMs: 10_000,
   thresholds: {
     excellent: { minDownlinkKbps: 20_000, maxRttMs: 50 },
     good: { minDownlinkKbps: 5_000, maxRttMs: 150 },
@@ -11,9 +12,11 @@ export const DEFAULT_CONFIG: NetworkQualityConfig = {
   },
   probe: {
     latencyUrl: 'https://www.gstatic.com/generate_204',
-    downloadUrl: 'https://speed.cloudflare.com/__down?bytes=1500000',
+    downloadUrl: 'https://speed.cloudflare.com/__down?bytes=3000000',
     latencySamples: 3,
     timeoutMs: 8_000,
+    downloadMaxDurationMs: 3_000,
+    downloadMaxBytes: 3_000_000,
     resultTtlMs: 60_000,
   },
   autoProbe: {

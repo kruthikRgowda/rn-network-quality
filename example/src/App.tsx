@@ -74,6 +74,7 @@ const STATE_FIELDS: (keyof NetworkQualityState)[] = [
   'effectiveDownlinkKbps',
   'effectiveRttMs',
   'lastProbe',
+  'lastProbeFailure',
   'reasons',
 ];
 
@@ -241,6 +242,15 @@ export default function App() {
   const dark = systemScheme === 'dark';
   const quality = state?.quality ?? 'unknown';
   const recommendation = VIDEO_RECOMMENDATION[quality];
+  const isValidating = state?.reasons.includes('validating') ?? false;
+  const probeFailureReason = state?.reasons.find((reason) =>
+    reason.startsWith('probe failed:')
+  );
+  const qualityLabel = isProbing
+    ? 'Measuring…'
+    : isValidating
+      ? 'Checking…'
+      : (state?.quality ?? 'Waiting…');
 
   useEffect(() => {
     if (state === null) return;
@@ -352,13 +362,13 @@ export default function App() {
             { backgroundColor: QUALITY_COLORS[quality] },
           ]}
         >
-          <Text style={styles.qualityLabel}>
-            {state ? state.quality : 'Waiting…'}
-          </Text>
+          <Text style={styles.qualityLabel}>{qualityLabel}</Text>
           <Text style={styles.qualitySource}>
-            {state
-              ? `Source: ${state.qualitySource}`
-              : 'Listening for the first native event'}
+            {probeFailureReason && state?.lastProbeFailure
+              ? `${state.lastProbeFailure.code} · ${probeFailureReason}`
+              : state
+                ? `Source: ${state.qualitySource}`
+                : 'Listening for the first native event'}
           </Text>
           <View style={styles.metricStrip}>
             <View>
@@ -452,7 +462,7 @@ export default function App() {
           </Text>
           <AppButton
             disabled={isProbing}
-            label={isProbing ? 'Probe running…' : 'Run probe'}
+            label={isProbing ? 'Measuring…' : 'Run probe'}
             onPress={() => probe().catch(() => undefined)}
           />
           {isProbing ? <ActivityIndicator style={styles.spinner} /> : null}

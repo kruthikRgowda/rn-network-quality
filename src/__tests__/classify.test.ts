@@ -1,9 +1,17 @@
 import { classifyNetworkQuality, isQualityAtLeast } from '../classify';
 import { DEFAULT_CONFIG } from '../constants';
-import type { NetworkQuality, QualityThresholds } from '../types';
+import type { NetworkQuality, ProbeFailure, QualityThresholds } from '../types';
 import { NOW, probe, snapshot } from './fixtures';
 
 describe('classifyNetworkQuality', () => {
+  const failure = (overrides: Partial<ProbeFailure> = {}): ProbeFailure => ({
+    code: 'E_PROBE_FAILED',
+    message: 'No internet response',
+    transport: 'wifi',
+    timestamp: NOW,
+    ...overrides,
+  });
+
   it('reports an offline snapshot before considering metrics', () => {
     expect(
       classifyNetworkQuality(
@@ -80,6 +88,98 @@ describe('classifyNetworkQuality', () => {
         NOW
       )
     ).toMatchObject({ quality: 'moderate', qualitySource: 'probe' });
+  });
+
+  it('forces poor probe quality for a fresh same-transport failure', () => {
+    expect(
+      classifyNetworkQuality(
+        snapshot({ downlinkKbps: 25_000 }),
+        null,
+        undefined,
+        NOW,
+        { lastProbeFailure: failure() }
+      )
+    ).toMatchObject({
+      quality: 'poor',
+      qualitySource: 'probe',
+      reasons: ['probe failed: E_PROBE_FAILED'],
+    });
+  });
+
+  it('ignores a stale probe failure', () => {
+    expect(
+      classifyNetworkQuality(
+        snapshot({ downlinkKbps: 5_000 }),
+        null,
+        undefined,
+        NOW,
+        {
+          lastProbeFailure: failure({
+            timestamp: NOW - DEFAULT_CONFIG.probe.resultTtlMs - 1,
+          }),
+        }
+      )
+    ).toMatchObject({ quality: 'good', qualitySource: 'os-estimate' });
+  });
+
+  it('ignores a probe failure from another transport', () => {
+    expect(
+      classifyNetworkQuality(
+        snapshot({ downlinkKbps: 5_000 }),
+        null,
+        undefined,
+        NOW,
+        { lastProbeFailure: failure({ transport: 'cellular' }) }
+      )
+    ).toMatchObject({ quality: 'good', qualitySource: 'os-estimate' });
+  });
+
+  it('lets a later successful probe supersede a failure', () => {
+    expect(
+      classifyNetworkQuality(
+        snapshot(),
+        probe({ timestamp: NOW }),
+        undefined,
+        NOW,
+        { lastProbeFailure: failure({ timestamp: NOW - 1 }) }
+      )
+    ).toMatchObject({ quality: 'excellent', qualitySource: 'probe' });
+  });
+
+  it('reports validating during the validation grace period', () => {
+    expect(
+      classifyNetworkQuality(
+        snapshot({ isValidated: false }),
+        null,
+        undefined,
+        NOW,
+        { networkChangedAt: NOW - DEFAULT_CONFIG.validationGraceMs + 1 }
+      )
+    ).toMatchObject({ quality: 'unknown', reasons: ['validating'] });
+  });
+
+  it('reports poor after the validation grace period', () => {
+    expect(
+      classifyNetworkQuality(
+        snapshot({ isValidated: false }),
+        null,
+        undefined,
+        NOW,
+        { networkChangedAt: NOW - DEFAULT_CONFIG.validationGraceMs }
+      )
+    ).toMatchObject({ quality: 'poor', reasons: ['not-validated'] });
+  });
+
+  it('reports a captive portal immediately during the grace period', () => {
+    expect(
+      classifyNetworkQuality(
+        snapshot({ isValidated: false, isCaptivePortal: true }),
+        null,
+        undefined,
+        NOW,
+        { networkChangedAt: NOW }
+      )
+    ).toMatchObject({ quality: 'poor', reasons: ['captive-portal'] });
   });
 
   it('ignores a probe that has expired', () => {

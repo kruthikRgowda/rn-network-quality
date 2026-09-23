@@ -5,6 +5,7 @@ const React = require('react');
 const DEFAULT_CONFIG = {
   throttleMs: 1_000,
   bandwidthChangeThresholdPct: 10,
+  validationGraceMs: 10_000,
   thresholds: {
     excellent: { minDownlinkKbps: 20_000, maxRttMs: 50 },
     good: { minDownlinkKbps: 5_000, maxRttMs: 150 },
@@ -12,9 +13,11 @@ const DEFAULT_CONFIG = {
   },
   probe: {
     latencyUrl: 'https://www.gstatic.com/generate_204',
-    downloadUrl: 'https://speed.cloudflare.com/__down?bytes=200000',
+    downloadUrl: 'https://speed.cloudflare.com/__down?bytes=3000000',
     latencySamples: 3,
     timeoutMs: 8_000,
+    downloadMaxDurationMs: 3_000,
+    downloadMaxBytes: 3_000_000,
     resultTtlMs: 60_000,
   },
   autoProbe: {
@@ -60,6 +63,7 @@ const GOOD_WIFI_STATE = {
   effectiveDownlinkKbps: 10_000,
   effectiveRttMs: null,
   lastProbe: null,
+  lastProbeFailure: null,
   reasons: ['downlink 10000 kbps → good'],
 };
 
@@ -84,7 +88,8 @@ function classifyNetworkQuality(
   snapshot,
   probe,
   classifierConfig = config,
-  now = Date.now()
+  now = Date.now(),
+  context = {}
 ) {
   if (!snapshot.isConnected) {
     return classification('offline', 'none', null, null, ['not-connected']);
@@ -92,7 +97,26 @@ function classifyNetworkQuality(
   if (snapshot.isCaptivePortal === true) {
     return classification('poor', 'none', null, null, ['captive-portal']);
   }
+  const failure = context.lastProbeFailure ?? null;
+  if (
+    failure !== null &&
+    failure.transport === snapshot.transport &&
+    now - failure.timestamp <=
+      (context.probeFailureTtlMs ?? classifierConfig.probe.resultTtlMs) &&
+    (probe === null || failure.timestamp > probe.timestamp)
+  ) {
+    return classification('poor', 'probe', null, null, [
+      `probe failed: ${failure.code}`,
+    ]);
+  }
   if (snapshot.isValidated === false) {
+    const networkChangedAt = context.networkChangedAt ?? null;
+    if (
+      networkChangedAt !== null &&
+      now - networkChangedAt < classifierConfig.validationGraceMs
+    ) {
+      return classification('unknown', 'none', null, null, ['validating']);
+    }
     return classification('poor', 'none', null, null, ['not-validated']);
   }
 
@@ -101,7 +125,10 @@ function classifyNetworkQuality(
   if (probe !== null) {
     if (probe.transport !== snapshot.transport) {
       reasons.push('probe stale (transport changed)');
-    } else if (now - probe.timestamp > classifierConfig.probe.resultTtlMs) {
+    } else if (
+      now - probe.timestamp >
+      (context.probeResultTtlMs ?? classifierConfig.probe.resultTtlMs)
+    ) {
       reasons.push('probe stale (expired)');
     } else {
       freshProbe = probe;

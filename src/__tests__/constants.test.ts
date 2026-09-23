@@ -7,7 +7,6 @@ describe('DEFAULT_CONFIG', () => {
     if (downloadUrl === null) throw new Error('Expected a download URL');
 
     const bytes = Number(new URL(downloadUrl).searchParams.get('bytes'));
-    expect(bytes).toBeGreaterThanOrEqual(1_000_000);
-    expect(bytes).toBeLessThanOrEqual(2_000_000);
+    expect(bytes).toBeGreaterThanOrEqual(DEFAULT_CONFIG.probe.downloadMaxBytes);
   });
 });

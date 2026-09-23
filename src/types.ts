@@ -84,6 +84,30 @@ export interface ProbeResult {
   timestamp: number;
 }
 
+/** Metadata captured when an active probe fails before producing a result. */
+export interface ProbeFailure {
+  /** Stable library error code returned by the failed probe. */
+  code: NetworkQualityErrorCode;
+  /** Human-readable native or JavaScript error message. */
+  message: string;
+  /** Transport active when the failed probe was started. */
+  transport: Transport;
+  /** Failure time in Unix-epoch milliseconds. */
+  timestamp: number;
+}
+
+/** Optional manager-owned inputs used by the pure classifier. */
+export interface NetworkQualityClassificationContext {
+  /** Most recent probe failure, when one is still relevant. */
+  lastProbeFailure?: ProbeFailure | null;
+  /** Time when connectivity or transport last changed. */
+  networkChangedAt?: number | null;
+  /** TTL used by the most recent successful probe override. */
+  probeResultTtlMs?: number;
+  /** TTL used by the most recent failed probe override. */
+  probeFailureTtlMs?: number;
+}
+
 /** A raw snapshot enriched with a classified quality tier and probe metadata. */
 export interface NetworkQualityState extends NetworkSnapshot {
   /** The derived quality tier. */
@@ -96,6 +120,8 @@ export interface NetworkQualityState extends NetworkSnapshot {
   effectiveRttMs: number | null;
   /** Most recent successful probe result. */
   lastProbe: ProbeResult | null;
+  /** Most recent relevant failed probe. */
+  lastProbeFailure: ProbeFailure | null;
   /** Human-readable classifier decisions, intended for diagnostics. */
   reasons: string[];
 }
@@ -128,6 +154,10 @@ export interface ProbeConfig {
   latencySamples: number;
   /** Positive whole-probe timeout in milliseconds, capped at 2,147,483,647. */
   timeoutMs: number;
+  /** Maximum throughput-measurement time after the first response byte. */
+  downloadMaxDurationMs: number;
+  /** Maximum response-body bytes consumed by the throughput measurement. */
+  downloadMaxBytes: number;
   /** Time for which a result may influence classification. */
   resultTtlMs: number;
 }
@@ -152,6 +182,8 @@ export interface NetworkQualityConfig {
   throttleMs: number;
   /** Percentage change required for bandwidth or signal updates. */
   bandwidthChangeThresholdPct: number;
+  /** Grace period before a newly connected, unvalidated network is poor. */
+  validationGraceMs: number;
   /** Classifier boundaries. */
   thresholds: QualityThresholds;
   /** Active-probe defaults. */
