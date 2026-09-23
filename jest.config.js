@@ -5,8 +5,6 @@ module.exports = {
     'src/**/*.{ts,tsx}',
     '!src/NativeNetworkQuality.ts',
     '!src/**/__tests__/**',
-    '!src/index.tsx',
-    '!src/types.ts',
   ],
   coverageThreshold: {
     global: {
