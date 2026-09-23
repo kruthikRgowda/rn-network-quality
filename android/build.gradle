@@ -1,8 +1,8 @@
 buildscript {
-  ext.RnNetworkQuality = [
-    kotlinVersion: "2.0.21",
+  ext.RNNetworkQuality = [
+    kotlinVersion: "2.2.0",
     minSdkVersion: 24,
-    compileSdkVersion: 36
+    compileSdkVersion: 37
   ]
 
   ext.getExtOrDefault = { prop ->
@@ -10,7 +10,7 @@ buildscript {
       return rootProject.ext.get(prop)
     }
 
-    return RnNetworkQuality[prop]
+    return RNNetworkQuality[prop]
   }
 
   repositories {
@@ -19,7 +19,7 @@ buildscript {
   }
 
   dependencies {
-    classpath "com.android.tools.build:gradle:8.7.2"
+    classpath "com.android.tools.build:gradle:9.2.1"
     // noinspection DifferentKotlinGradleVersion
     classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${getExtOrDefault('kotlinVersion')}"
   }
@@ -48,8 +48,13 @@ android {
     sourceCompatibility JavaVersion.VERSION_17
     targetCompatibility JavaVersion.VERSION_17
   }
+
+  testOptions {
+    unitTests.returnDefaultValues = true
+  }
 }
 
 dependencies {
   implementation "com.facebook.react:react-android"
+  testImplementation "junit:junit:4.13.2"
 }
