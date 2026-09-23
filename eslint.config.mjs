@@ -24,6 +24,19 @@ export default defineConfig([
     },
   },
   {
-    ignores: ['node_modules/', 'lib/', 'coverage/'],
+    ignores: [
+      'node_modules/',
+      'lib/',
+      'coverage/',
+      '.yarn/',
+      'android/build/',
+      'android/generated/',
+      'example/android/build/',
+      'example/android/app/build/',
+      'example/ios/build/',
+      'example/ios/Pods/',
+      'ios/build/',
+      'ios/generated/',
+    ],
   },
 ]);

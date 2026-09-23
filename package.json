@@ -4,12 +4,15 @@
   "description": "Live network quality signals for React Native — bandwidth, link quality and connectivity via a New Architecture TurboModule",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
+  "react-native": "./src/index.tsx",
+  "source": "./src/index.tsx",
   "exports": {
     ".": {
       "rn-network-quality-source": "./src/index.tsx",
       "types": "./lib/typescript/src/index.d.ts",
       "default": "./lib/module/index.js"
     },
+    "./mock": "./mock.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -17,15 +20,16 @@
     "lib",
     "android",
     "ios",
-    "cpp",
     "*.podspec",
-    "react-native.config.js",
+    "mock.js",
     "!ios/build",
     "!android/build",
+    "!android/.gradle",
     "!android/gradle",
     "!android/gradlew",
     "!android/gradlew.bat",
     "!android/local.properties",
+    "!android/src/test",
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
@@ -36,34 +40,54 @@
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
     "test": "jest",
+    "test:coverage": "jest --coverage --runInBand",
     "typecheck": "tsc",
-    "lint": "eslint \"**/*.{js,ts,tsx}\""
+    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "lint:fix": "yarn lint --fix",
+    "codegen:check": "node scripts/check-codegen.mjs",
+    "pack:check": "node scripts/check-package.mjs",
+    "commitlint": "commitlint",
+    "release": "release-it"
   },
   "keywords": [
     "react-native",
+    "network",
+    "network-quality",
+    "bandwidth",
+    "connectivity",
+    "turbomodule",
+    "new-architecture",
+    "nwpathmonitor",
+    "networkcapabilities",
     "ios",
     "android"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kruthikRgowda/rn-network-quality-.git.git"
+    "url": "git+https://github.com/kruthikRgowda/rn-network-quality-.git"
   },
   "author": "kruthik <kruthikbr2@gmail.com> (https://github.com/kruthikRgowda)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/kruthikRgowda/rn-network-quality-.git/issues"
+    "url": "https://github.com/kruthikRgowda/rn-network-quality-/issues"
   },
-  "homepage": "https://github.com/kruthikRgowda/rn-network-quality-.git#readme",
+  "homepage": "https://github.com/kruthikRgowda/rn-network-quality-#readme",
+  "sideEffects": false,
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
     "@eslint/compat": "^2.1.0",
     "@eslint/eslintrc": "^3.3.6",
     "@eslint/js": "^9.39.5",
     "@react-native/babel-preset": "0.87.1",
-    "@react-native/eslint-config": "0.86.2",
+    "@react-native/eslint-config": "0.87.1",
     "@react-native/jest-preset": "0.87.1",
+    "@release-it/conventional-changelog": "^12.0.2",
     "@testing-library/react-native": "13.3.3",
     "@types/jest": "30.0.0",
     "@types/react": "^19.2.0",
@@ -74,17 +98,19 @@
     "eslint-plugin-ft-flow": "^3.0.11",
     "eslint-plugin-prettier": "^5.5.6",
     "jest": "29.7.0",
-    "prettier": "^3.9.6",
+    "lefthook": "^2.1.14",
+    "prettier": "^3.9.8",
     "react": "19.2.3",
     "react-native": "0.87.1",
     "react-native-builder-bob": "^0.43.1",
     "react-test-renderer": "19.2.3",
+    "release-it": "^21.1.0",
     "turbo": "^2.10.8",
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": "*"
+    "react-native": ">=0.80.0"
   },
   "workspaces": [
     "example"
@@ -123,13 +149,6 @@
         }
       }
     }
-  },
-  "prettier": {
-    "quoteProps": "consistent",
-    "singleQuote": true,
-    "tabWidth": 2,
-    "trailingComma": "es5",
-    "useTabs": false
   },
   "create-react-native-library": {
     "type": "turbo-module",

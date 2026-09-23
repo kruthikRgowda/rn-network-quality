@@ -1,0 +1,12 @@
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      run: corepack yarn lint
+    typecheck:
+      run: corepack yarn typecheck
+
+commit-msg:
+  commands:
+    commitlint:
+      run: corepack yarn commitlint --edit {1}
