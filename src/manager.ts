@@ -326,6 +326,7 @@ export class NetworkQualityManager {
   private autoProbeInterval: ReturnType<typeof setInterval> | null = null;
   private transportDebounce: ReturnType<typeof setTimeout> | null = null;
   private appStateStatus: string | null | undefined;
+  private monitoringStopVersion = 0;
   private stateVersion = 0;
 
   public constructor(
@@ -423,6 +424,7 @@ export class NetworkQualityManager {
           this.nativeSubscription = null;
           this.clearProbeExpiry();
           this.stopAutoProbeLifecycle();
+          this.monitoringStopVersion += 1;
           nativeModule.stopMonitoring();
         }
       },
@@ -444,6 +446,7 @@ export class NetworkQualityManager {
       latencySamples: probeConfig.latencySamples,
       timeoutMs: probeConfig.timeoutMs,
     };
+    const stopVersionAtStart = this.monitoringStopVersion;
 
     let transport: ProbeResult['transport'] = 'unknown';
     let nativeProbe: Promise<NativeProbeResult>;
@@ -453,6 +456,12 @@ export class NetworkQualityManager {
         nativeProbe = nativeModule.probe(nativeOptions);
       } else {
         nativeProbe = nativeModule.getCurrentState().then((snapshot) => {
+          if (this.monitoringStopVersion !== stopVersionAtStart) {
+            throw new NetworkQualityError(
+              'E_PROBE_FAILED',
+              'The network probe was cancelled because monitoring stopped.'
+            );
+          }
           transport = this.acceptNativeSnapshot(snapshot).transport;
           return nativeModule.probe(nativeOptions);
         });

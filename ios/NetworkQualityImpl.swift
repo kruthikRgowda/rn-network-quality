@@ -39,7 +39,7 @@ public final class NetworkQualityImpl: NSObject {
         return
       }
 
-      withOneShotPath { [weak self] path in
+      withOneShotPath { [weak self] path, _ in
         guard let self else { return }
         if let path {
           resolve(PathSnapshot.make(path: path, cellularInfo: cellularInfo))
@@ -146,10 +146,14 @@ public final class NetworkQualityImpl: NSObject {
         reject("E_PROBE_FAILED", "NetworkQuality has been invalidated.", nil)
         return
       }
-      currentPath { [weak self] path in
+      currentPath { [weak self] path, wasCancelled in
         guard let self else { return }
         guard !invalidated else {
           reject("E_PROBE_FAILED", "NetworkQuality has been invalidated.", nil)
+          return
+        }
+        guard !wasCancelled else {
+          reject("E_PROBE_FAILED", "The network probe was cancelled.", nil)
           return
         }
         guard let path, path.status == .satisfied else {
@@ -226,18 +230,24 @@ public final class NetworkQualityImpl: NSObject {
     throttler = nil
     activeProbes.values.forEach { $0.cancel() }
     activeProbes.removeAll()
-    Array(activeOneShots.keys).forEach { finishOneShot($0, path: nil) }
+    Array(activeOneShots.keys).forEach {
+      finishOneShot($0, path: nil, wasCancelled: true)
+    }
   }
 
-  private func currentPath(completion: @escaping (NWPath?) -> Void) {
+  private func currentPath(
+    completion: @escaping (NWPath?, Bool) -> Void
+  ) {
     if let monitor {
-      completion(monitor.currentPath)
+      completion(monitor.currentPath, false)
     } else {
       withOneShotPath(completion: completion)
     }
   }
 
-  private func withOneShotPath(completion: @escaping (NWPath?) -> Void) {
+  private func withOneShotPath(
+    completion: @escaping (NWPath?, Bool) -> Void
+  ) {
     let oneShot = NWPathMonitor()
     let identifier = UUID()
     activeOneShots[identifier] = OneShotRequest(
@@ -246,22 +256,26 @@ public final class NetworkQualityImpl: NSObject {
     )
 
     oneShot.pathUpdateHandler = { [weak self] path in
-      self?.finishOneShot(identifier, path: path)
+      self?.finishOneShot(identifier, path: path, wasCancelled: false)
     }
     oneShot.start(queue: queue)
 
     queue.asyncAfter(deadline: .now() + 2) { [weak self] in
-      self?.finishOneShot(identifier, path: nil)
+      self?.finishOneShot(identifier, path: nil, wasCancelled: false)
     }
   }
 
-  private func finishOneShot(_ identifier: UUID, path: NWPath?) {
+  private func finishOneShot(
+    _ identifier: UUID,
+    path: NWPath?,
+    wasCancelled: Bool
+  ) {
     guard let request = activeOneShots.removeValue(forKey: identifier) else {
       return
     }
     request.monitor.pathUpdateHandler = nil
     request.monitor.cancel()
-    request.completion(path)
+    request.completion(path, wasCancelled)
   }
 
   private func performSynchronouslyOnQueue(_ action: () -> Void) {
@@ -275,5 +289,5 @@ public final class NetworkQualityImpl: NSObject {
 
 private struct OneShotRequest {
   let monitor: NWPathMonitor
-  let completion: (NWPath?) -> Void
+  let completion: (NWPath?, Bool) -> Void
 }

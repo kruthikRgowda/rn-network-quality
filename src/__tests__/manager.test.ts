@@ -404,6 +404,28 @@ describe('NetworkQualityManager probes', () => {
     expect(context.manager.getCachedState()?.lastProbe).toBe(result);
   });
 
+  it('does not launch a cold probe after monitoring stops during preflight', async () => {
+    const context = createManager();
+    const pendingSnapshot = deferred<NativeNetworkSnapshot>();
+    context.getCurrentState.mockReturnValueOnce(pendingSnapshot.promise);
+    const subscription = context.manager.addNetworkQualityListener(jest.fn());
+
+    const pendingProbe = context.manager.probeNetwork();
+    subscription.remove();
+    pendingSnapshot.resolve(snapshot());
+
+    await expect(pendingProbe).rejects.toMatchObject({
+      code: 'E_PROBE_FAILED',
+      message: expect.stringContaining('monitoring stopped'),
+    });
+    expect(context.probe).not.toHaveBeenCalled();
+    await expect(context.manager.probeNetwork()).resolves.toMatchObject({
+      transport: 'wifi',
+    });
+    expect(context.getCurrentState).toHaveBeenCalledTimes(2);
+    expect(context.probe).toHaveBeenCalledTimes(1);
+  });
+
   it('uses a per-call result TTL when classifying the completed probe', async () => {
     const now = jest.spyOn(Date, 'now').mockReturnValue(2_000_500);
     const context = createManager();
