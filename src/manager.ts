@@ -22,6 +22,8 @@ import type {
 
 const MIN_AUTO_PROBE_INTERVAL_MS = 15_000;
 const TRANSPORT_CHANGE_DEBOUNCE_MS = 2_000;
+const MAX_LATENCY_SAMPLES = 100;
+const MAX_NATIVE_TIMEOUT_MS = 2_147_483_647;
 const SUPPORTED_ERROR_CODES = new Set<NetworkQualityErrorCode>([
   'E_UNSUPPORTED',
   'E_OFFLINE',
@@ -197,12 +199,21 @@ function validateProbeConfig(config: ProbeConfig): void {
   ) {
     throw new TypeError('probe.downloadUrl must be null or a non-empty string');
   }
-  if (!Number.isInteger(config.latencySamples) || config.latencySamples < 1) {
+  if (
+    !Number.isInteger(config.latencySamples) ||
+    config.latencySamples < 1 ||
+    config.latencySamples > MAX_LATENCY_SAMPLES
+  ) {
     throw new TypeError(
-      'probe.latencySamples must be an integer of at least 1'
+      `probe.latencySamples must be an integer between 1 and ${MAX_LATENCY_SAMPLES}`
     );
   }
   assertFiniteNumber(config.timeoutMs, 'probe.timeoutMs', 0, true);
+  if (config.timeoutMs > MAX_NATIVE_TIMEOUT_MS) {
+    throw new TypeError(
+      `probe.timeoutMs must be at most ${MAX_NATIVE_TIMEOUT_MS}`
+    );
+  }
   assertFiniteNumber(config.resultTtlMs, 'probe.resultTtlMs', 0);
 }
 
@@ -308,6 +319,7 @@ export class NetworkQualityManager {
   private latestSnapshot: NetworkSnapshot | null = null;
   private cachedState: NetworkQualityState | null = null;
   private lastProbe: ProbeResult | null = null;
+  private lastProbeResultTtlMs: number | null = null;
   private inFlightProbe: Promise<ProbeResult> | null = null;
   private autoProbeInterval: ReturnType<typeof setInterval> | null = null;
   private transportDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -440,6 +452,7 @@ export class NetworkQualityManager {
       .then((result) => {
         const probeResult: ProbeResult = { ...result, transport };
         this.lastProbe = probeResult;
+        this.lastProbeResultTtlMs = probeConfig.resultTtlMs;
         this.reclassifyCachedSnapshot();
         return probeResult;
       })
@@ -495,9 +508,19 @@ export class NetworkQualityManager {
   }
 
   private buildState(snapshot: NetworkSnapshot): NetworkQualityState {
+    const classifierConfig =
+      this.lastProbeResultTtlMs === null
+        ? this.config
+        : {
+            ...this.config,
+            probe: {
+              ...this.config.probe,
+              resultTtlMs: this.lastProbeResultTtlMs,
+            },
+          };
     return {
       ...snapshot,
-      ...classifyNetworkQuality(snapshot, this.lastProbe, this.config),
+      ...classifyNetworkQuality(snapshot, this.lastProbe, classifierConfig),
       lastProbe: this.lastProbe,
     };
   }

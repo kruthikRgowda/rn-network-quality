@@ -12,6 +12,8 @@ public final class NetworkQualityImpl: NSObject {
   private var throttler: Throttler?
   private var latestSnapshot: [String: Any]?
   private var activeProbes: [UUID: NetworkProbe] = [:]
+  private var activeOneShots: [UUID: OneShotRequest] = [:]
+  private var invalidated = false
 
   public override init() {
     super.init()
@@ -25,6 +27,10 @@ public final class NetworkQualityImpl: NSObject {
   ) {
     queue.async { [weak self] in
       guard let self else { return }
+      guard !invalidated else {
+        reject("E_STATE_FAILED", "NetworkQuality has been invalidated.", nil)
+        return
+      }
       if let monitor {
         let snapshot = latestSnapshot
           ?? PathSnapshot.make(path: monitor.currentPath, cellularInfo: cellularInfo)
@@ -51,6 +57,7 @@ public final class NetworkQualityImpl: NSObject {
   ) {
     queue.async { [weak self] in
       guard let self else { return }
+      guard !invalidated else { return }
       let throttle = max(0, throttleMs.doubleValue)
       let threshold = max(0, bandwidthChangeThresholdPct.doubleValue)
 
@@ -108,10 +115,43 @@ public final class NetworkQualityImpl: NSObject {
       downloadURL = nil
     }
 
+    let latencySampleValue = latencySamples.doubleValue
+    guard
+      latencySampleValue.isFinite,
+      latencySampleValue.rounded(.towardZero) == latencySampleValue,
+      latencySampleValue >= 1,
+      latencySampleValue <= 100
+    else {
+      reject(
+        "E_PROBE_FAILED",
+        "latencySamples must be an integer between 1 and 100.",
+        nil
+      )
+      return
+    }
+    let timeoutValue = timeoutMs.doubleValue
+    guard timeoutValue.isFinite, timeoutValue > 0, timeoutValue <= 2_147_483_647
+    else {
+      reject(
+        "E_PROBE_FAILED",
+        "timeoutMs must be greater than 0 and at most 2147483647.",
+        nil
+      )
+      return
+    }
+
     queue.async { [weak self] in
       guard let self else { return }
+      guard !invalidated else {
+        reject("E_PROBE_FAILED", "NetworkQuality has been invalidated.", nil)
+        return
+      }
       currentPath { [weak self] path in
         guard let self else { return }
+        guard !invalidated else {
+          reject("E_PROBE_FAILED", "NetworkQuality has been invalidated.", nil)
+          return
+        }
         guard let path, path.status == .satisfied else {
           reject("E_OFFLINE", "No connected network is available for probing.", nil)
           return
@@ -121,8 +161,8 @@ public final class NetworkQualityImpl: NSObject {
         let networkProbe = NetworkProbe(
           latencyURL: latencyURL,
           downloadURL: downloadURL,
-          latencySamples: max(1, latencySamples.intValue),
-          timeoutMs: max(1, timeoutMs.doubleValue)
+          latencySamples: Int(latencySampleValue),
+          timeoutMs: max(1, timeoutValue)
         ) { [weak self] result in
           self?.queue.async {
             self?.activeProbes.removeValue(forKey: identifier)
@@ -143,9 +183,9 @@ public final class NetworkQualityImpl: NSObject {
   @objc public func invalidate() {
     performSynchronouslyOnQueue { [weak self] in
       guard let self else { return }
+      guard !invalidated else { return }
+      invalidated = true
       stopMonitoringOnQueue()
-      activeProbes.values.forEach { $0.cancel() }
-      activeProbes.removeAll()
       onChange = nil
     }
   }
@@ -184,6 +224,9 @@ public final class NetworkQualityImpl: NSObject {
     latestSnapshot = nil
     throttler?.reset()
     throttler = nil
+    activeProbes.values.forEach { $0.cancel() }
+    activeProbes.removeAll()
+    Array(activeOneShots.keys).forEach { finishOneShot($0, path: nil) }
   }
 
   private func currentPath(completion: @escaping (NWPath?) -> Void) {
@@ -196,24 +239,29 @@ public final class NetworkQualityImpl: NSObject {
 
   private func withOneShotPath(completion: @escaping (NWPath?) -> Void) {
     let oneShot = NWPathMonitor()
-    var completed = false
+    let identifier = UUID()
+    activeOneShots[identifier] = OneShotRequest(
+      monitor: oneShot,
+      completion: completion
+    )
 
-    oneShot.pathUpdateHandler = { path in
-      guard !completed else { return }
-      completed = true
-      oneShot.pathUpdateHandler = nil
-      oneShot.cancel()
-      completion(path)
+    oneShot.pathUpdateHandler = { [weak self] path in
+      self?.finishOneShot(identifier, path: path)
     }
     oneShot.start(queue: queue)
 
-    queue.asyncAfter(deadline: .now() + 2) {
-      guard !completed else { return }
-      completed = true
-      oneShot.pathUpdateHandler = nil
-      oneShot.cancel()
-      completion(nil)
+    queue.asyncAfter(deadline: .now() + 2) { [weak self] in
+      self?.finishOneShot(identifier, path: nil)
     }
+  }
+
+  private func finishOneShot(_ identifier: UUID, path: NWPath?) {
+    guard let request = activeOneShots.removeValue(forKey: identifier) else {
+      return
+    }
+    request.monitor.pathUpdateHandler = nil
+    request.monitor.cancel()
+    request.completion(path)
   }
 
   private func performSynchronouslyOnQueue(_ action: () -> Void) {
@@ -223,4 +271,9 @@ public final class NetworkQualityImpl: NSObject {
       queue.sync(execute: action)
     }
   }
+}
+
+private struct OneShotRequest {
+  let monitor: NWPathMonitor
+  let completion: (NWPath?) -> Void
 }

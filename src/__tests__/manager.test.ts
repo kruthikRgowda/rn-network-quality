@@ -365,7 +365,9 @@ describe('NetworkQualityManager configuration', () => {
     [{ probe: { downloadUrl: '' } }, 'downloadUrl'],
     [{ probe: { latencySamples: 1.5 } }, 'latencySamples'],
     [{ probe: { latencySamples: 0 } }, 'latencySamples'],
+    [{ probe: { latencySamples: 101 } }, 'latencySamples'],
     [{ probe: { timeoutMs: 0 } }, 'timeoutMs'],
+    [{ probe: { timeoutMs: 2_147_483_648 } }, 'timeoutMs'],
     [{ probe: { resultTtlMs: -1 } }, 'resultTtlMs'],
     [{ autoProbe: { intervalMs: -1 } }, 'intervalMs'],
     [{ autoProbe: { enabled: 'yes' } }, 'enabled'],
@@ -388,6 +390,22 @@ describe('NetworkQualityManager configuration', () => {
 });
 
 describe('NetworkQualityManager probes', () => {
+  it('uses a per-call result TTL when classifying the completed probe', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(2_000_500);
+    const context = createManager();
+    const subscription = context.manager.addNetworkQualityListener(jest.fn());
+    context.emitNative(snapshot());
+
+    await context.manager.probeNetwork({ resultTtlMs: 100 });
+
+    expect(context.manager.getCachedState()).toMatchObject({
+      quality: 'unknown',
+      reasons: expect.arrayContaining(['probe stale (expired)']),
+    });
+    subscription.remove();
+    now.mockRestore();
+  });
+
   it('de-duplicates concurrent probes and captures transport before native work', async () => {
     const context = createManager();
     const listener = jest.fn();

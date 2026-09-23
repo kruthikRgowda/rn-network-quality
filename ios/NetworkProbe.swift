@@ -101,10 +101,11 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
   func cancel() {
     queue.async { [weak self] in
       guard let self, !isFinished else { return }
-      phase = .finished
-      timeoutItem?.cancel()
-      activeTask?.cancel()
-      session.invalidateAndCancel()
+      fail(
+        code: "E_PROBE_FAILED",
+        message: "The network probe was cancelled.",
+        error: nil
+      )
     }
   }
 
@@ -303,7 +304,7 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     phase = .finished
     timeoutItem?.cancel()
     activeTask?.cancel()
-    session.finishTasksAndInvalidate()
+    session.invalidateAndCancel()
     completion(result)
   }
 
