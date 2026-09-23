@@ -1,67 +1,146 @@
-name: 🐛 Bug report
-description: Report a reproducible bug or regression in this library.
-labels: [bug]
+name: Bug report
+description: Report a reproducible rn-network-quality defect or regression.
+title: 'fix: '
+labels:
+  - bug
 body:
   - type: markdown
     attributes:
       value: |
-        # Bug report
+        Thanks for reporting a problem. Remove secrets and personal or host-app data from logs and repro projects. Security vulnerabilities must be reported privately through the repository's Security tab.
 
-        👋 Hi!
-
-        **Please fill the following carefully before opening a new issue ❗**
-        *(Your issue may be closed if it doesn't provide the required pieces of information)*
   - type: checkboxes
+    id: checks
     attributes:
-      label: Before submitting a new issue
-      description: Please perform simple checks first.
+      label: Preflight checks
       options:
-        - label: I tested using the latest version of the library, as the bug might be already fixed.
+        - label: I searched existing issues and did not find the same problem.
           required: true
-        - label: I tested using a [supported version](https://github.com/reactwg/react-native-releases/blob/main/docs/support.md) of react native.
+        - label: I can reproduce this with the latest rn-network-quality release.
           required: true
-        - label: I checked for possible duplicate issues, with possible answers.
+        - label: My app uses React Native's New Architecture and is not running in Expo Go.
           required: true
-  - type: textarea
-    id: summary
-    attributes:
-      label: Bug summary
-      description: |
-        Provide a clear and concise description of what the bug is.
-        If needed, you can also provide other samples: error messages / stack traces, screenshots, gifs, etc.
-    validations:
-      required: true
+
   - type: input
     id: library-version
     attributes:
-      label: Library version
-      description: What version of the library are you using?
-      placeholder: "x.x.x"
+      label: rn-network-quality version
+      description: Provide the exact installed package version from the lockfile.
     validations:
       required: true
-  - type: textarea
-    id: react-native-info
+
+  - type: input
+    id: react-native-version
     attributes:
-      label: Environment info
-      description: Run `react-native info` in your terminal and paste the results here.
+      label: React Native version
+      description: Provide the exact React Native version.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - iOS
+        - Android and iOS
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      description: Provide the Android API/release or iOS version where the problem occurs.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device-kind
+    attributes:
+      label: Runtime
+      options:
+        - Physical device
+        - Android emulator
+        - iOS simulator
+        - Physical device and emulator/simulator
+    validations:
+      required: true
+
+  - type: input
+    id: device-model
+    attributes:
+      label: Device or virtual-device model
+      description: Name the hardware model or emulator/simulator profile.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection involved
+      options:
+        - Wi-Fi
+        - Cellular
+        - Ethernet
+        - VPN
+        - Offline or airplane mode
+        - Multiple or handover
+        - Not connection-specific
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the defect, how often it occurs, and the smallest relevant configuration.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide a minimal numbered sequence and runnable code or a public reproduction repository.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the state, event, result, or error you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe the state, event, result, or error you received instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste Metro, Logcat, Xcode, or NetworkQualityError output after removing secrets and personal data.
       render: shell
     validations:
       required: true
+
   - type: textarea
-    id: steps-to-reproduce
+    id: environment
     attributes:
-      label: Steps to reproduce
-      description: |
-        You must provide a clear list of steps and code to reproduce the problem.
-      value: |
-        1. …
-        2. …
-    validations:
-      required: true
-  - type: input
-    id: reproducible-example
-    attributes:
-      label: Reproducible example repository 
-      description: Please provide a link to a repository on GitHub with a reproducible example.
+      label: Environment details
+      description: Include the output of `npx react-native info` and mention Expo development-build/prebuild use if applicable.
+      render: shell
     validations:
       required: true

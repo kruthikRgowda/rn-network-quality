@@ -1,0 +1,73 @@
+name: Feature request
+description: Propose a focused enhancement to rn-network-quality.
+title: 'feat: '
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the user problem before proposing an API. The project is New-Architecture-only, has no third-party runtime dependencies, and does not collect network identity or location data.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched existing issues and discussions for this request.
+          required: true
+        - label: This request fits Android/iOS New Architecture support and does not require Expo Go or the legacy bridge.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe the product decision or developer workflow that is currently difficult.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the public behavior, data semantics, and API shape you would like.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Platforms
+      options:
+        - Android
+        - iOS
+        - Android and iOS
+        - TypeScript-only
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain current workarounds and why they are insufficient.
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Privacy, permissions, traffic, and performance
+      description: Identify any new permission, endpoint, network traffic, battery use, or data exposure the proposal might require. Write “None” when it requires none.
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Usage example
+      description: Show how an application would use the proposed behavior.
+      render: typescript
+    validations:
+      required: true
