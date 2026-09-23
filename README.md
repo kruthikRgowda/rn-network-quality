@@ -250,7 +250,7 @@ import { probeNetwork } from 'rn-network-quality';
 
 const result = await probeNetwork({
   latencyUrl: 'https://network.example.com/204',
-  downloadUrl: 'https://network.example.com/probe-200kb.bin',
+  downloadUrl: 'https://network.example.com/probe-1500kb.bin',
   timeoutMs: 6_000,
 });
 
@@ -493,26 +493,26 @@ import type { NetworkQualityState, ProbeConfig } from 'rn-network-quality';
 `configure()` accepts a recursive partial value, so changing one nested field
 does not reset its siblings. `getConfig()` returns a defensive copy.
 
-| Field                                  | Default                                            | Meaning                                                              |
-| -------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------- |
-| `throttleMs`                           | `1000`                                             | Minimum interval for minor native numeric updates                    |
-| `bandwidthChangeThresholdPct`          | `10`                                               | Percentage movement required for bandwidth or signal updates         |
-| `thresholds.excellent.minDownlinkKbps` | `20000`                                            | Excellent minimum downstream rate                                    |
-| `thresholds.excellent.maxRttMs`        | `50`                                               | Excellent maximum round-trip time                                    |
-| `thresholds.good.minDownlinkKbps`      | `5000`                                             | Good minimum downstream rate                                         |
-| `thresholds.good.maxRttMs`             | `150`                                              | Good maximum round-trip time                                         |
-| `thresholds.moderate.minDownlinkKbps`  | `1000`                                             | Moderate minimum downstream rate                                     |
-| `thresholds.moderate.maxRttMs`         | `400`                                              | Moderate maximum round-trip time                                     |
-| `probe.latencyUrl`                     | `https://www.gstatic.com/generate_204`             | Latency endpoint                                                     |
-| `probe.downloadUrl`                    | `https://speed.cloudflare.com/__down?bytes=200000` | Throughput payload endpoint; `null` disables this phase              |
-| `probe.latencySamples`                 | `3`                                                | Retained requests after one warm-up                                  |
-| `probe.timeoutMs`                      | `8000`                                             | Whole-probe time budget                                              |
-| `probe.resultTtlMs`                    | `60000`                                            | How long same-transport probe data influences quality                |
-| `autoProbe.enabled`                    | `false`                                            | Whether scheduled probing is active                                  |
-| `autoProbe.intervalMs`                 | `60000`                                            | Scheduled interval, clamped to at least `15000`                      |
-| `autoProbe.onTransportChange`          | `true`                                             | Schedule a debounced probe after a transport change                  |
-| `autoProbe.allowOnExpensive`           | `false`                                            | Permit automatic traffic on an OS-designated expensive network       |
-| `autoProbe.allowOnConstrained`         | `false`                                            | Permit automatic traffic while Data Saver or Low Data Mode is active |
+| Field                                  | Default                                             | Meaning                                                              |
+| -------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------- |
+| `throttleMs`                           | `1000`                                              | Minimum interval for minor native numeric updates                    |
+| `bandwidthChangeThresholdPct`          | `10`                                                | Percentage movement required for bandwidth or signal updates         |
+| `thresholds.excellent.minDownlinkKbps` | `20000`                                             | Excellent minimum downstream rate                                    |
+| `thresholds.excellent.maxRttMs`        | `50`                                                | Excellent maximum round-trip time                                    |
+| `thresholds.good.minDownlinkKbps`      | `5000`                                              | Good minimum downstream rate                                         |
+| `thresholds.good.maxRttMs`             | `150`                                               | Good maximum round-trip time                                         |
+| `thresholds.moderate.minDownlinkKbps`  | `1000`                                              | Moderate minimum downstream rate                                     |
+| `thresholds.moderate.maxRttMs`         | `400`                                               | Moderate maximum round-trip time                                     |
+| `probe.latencyUrl`                     | `https://www.gstatic.com/generate_204`              | Latency endpoint                                                     |
+| `probe.downloadUrl`                    | `https://speed.cloudflare.com/__down?bytes=1500000` | Throughput payload endpoint; `null` disables this phase              |
+| `probe.latencySamples`                 | `3`                                                 | Retained requests after one warm-up                                  |
+| `probe.timeoutMs`                      | `8000`                                              | Whole-probe time budget                                              |
+| `probe.resultTtlMs`                    | `60000`                                             | How long same-transport probe data influences quality                |
+| `autoProbe.enabled`                    | `false`                                             | Whether scheduled probing is active                                  |
+| `autoProbe.intervalMs`                 | `60000`                                             | Scheduled interval, clamped to at least `15000`                      |
+| `autoProbe.onTransportChange`          | `true`                                              | Schedule a debounced probe after a transport change                  |
+| `autoProbe.allowOnExpensive`           | `false`                                             | Permit automatic traffic on an OS-designated expensive network       |
+| `autoProbe.allowOnConstrained`         | `false`                                             | Permit automatic traffic while Data Saver or Low Data Mode is active |
 
 Durations and thresholds must be finite and non-negative;
 `probe.timeoutMs` must be positive and no greater than `2_147_483_647`;
@@ -657,9 +657,10 @@ Probing is opt-in. Calling `probeNetwork()` performs:
 
 1. One warm-up request followed by three retained latency requests by default.
    The reported RTT is the median of retained samples.
-2. One optional download capped at 5 MB. Measurements smaller than 32 KB or
-   shorter than 50 ms leave `downlinkKbps` as `null` because the sample is too
-   small to report reliably.
+2. One optional download capped at 5 MB. Measurements smaller than 32 KB leave
+   `downlinkKbps` as `null`. Android also rejects downloads shorter than 50 ms;
+   iOS accepts any positive measurable body duration so fast connections still
+   produce a throughput value.
 3. A whole-operation timeout, eight seconds by default.
 
 Requests use random `_nq` cache-busting query values, `Cache-Control: no-cache`,
@@ -676,8 +677,8 @@ mutates that handler.
 
 The default latency endpoint is
 `https://www.gstatic.com/generate_204`. The default throughput endpoint is
-`https://speed.cloudflare.com/__down?bytes=200000`. A default probe downloads
-about 200 KB plus four small latency responses and protocol overhead. Endpoint
+`https://speed.cloudflare.com/__down?bytes=1500000`. A default probe downloads
+about 1.5 MB plus four small latency responses and protocol overhead. Endpoint
 operators can observe ordinary request metadata such as source IP and headers;
 the library adds no user identifier or telemetry.
 
@@ -690,7 +691,7 @@ import { configure } from 'rn-network-quality';
 configure({
   probe: {
     latencyUrl: 'https://network.example.com/204',
-    downloadUrl: 'https://network.example.com/probe-200kb.bin',
+    downloadUrl: 'https://network.example.com/probe-1500kb.bin',
   },
 });
 ```
@@ -853,10 +854,11 @@ hardware.
 ### A probe has RTT but no downlink result
 
 Read `downloadError` for a timeout, transport error, or rejected endpoint. If it
-is `null`, the response may have contained fewer than 32 KB or completed in
-under 50 ms; those samples intentionally leave `downlinkKbps` as `null` without
-being treated as a request failure. Latency remains valid by design. Confirm
-the URL is HTTP(S), returns a body, and is accessible from the device.
+is `null`, the response may have contained fewer than 32 KB. Android also leaves
+downloads completed in under 50 ms as `null`; iOS only requires a positive
+measurable body duration. These cases are not treated as request failures, and
+latency remains valid by design. Confirm the URL is HTTP(S), returns a body, and
+is accessible from the device.
 
 ### State is not emitted for every tiny signal change
 

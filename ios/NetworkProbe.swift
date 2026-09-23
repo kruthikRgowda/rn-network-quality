@@ -17,7 +17,6 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
 
   private static let maximumDownloadBytes = 5 * 1_024 * 1_024
   private static let minimumDownloadBytes = 32 * 1_024
-  private static let minimumDownloadDurationMs = 50.0
 
   private let latencyURL: URL
   private let downloadURL: URL?
@@ -284,7 +283,7 @@ final class NetworkProbe: NSObject, URLSessionDataDelegate, URLSessionTaskDelega
     if downloadError == nil,
       downloadURL != nil,
       receivedBytes >= Self.minimumDownloadBytes,
-      downloadDuration >= Self.minimumDownloadDurationMs
+      downloadDuration > 0
     {
       downlinkKbps = Double(receivedBytes) * 8 / downloadDuration
     } else {

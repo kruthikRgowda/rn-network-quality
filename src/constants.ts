@@ -11,7 +11,7 @@ export const DEFAULT_CONFIG: NetworkQualityConfig = {
   },
   probe: {
     latencyUrl: 'https://www.gstatic.com/generate_204',
-    downloadUrl: 'https://speed.cloudflare.com/__down?bytes=200000',
+    downloadUrl: 'https://speed.cloudflare.com/__down?bytes=1500000',
     latencySamples: 3,
     timeoutMs: 8_000,
     resultTtlMs: 60_000,

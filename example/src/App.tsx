@@ -4,15 +4,14 @@ import {
   PermissionsAndroid,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Switch,
   Text,
   useColorScheme,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   configure,
   getConfig,
@@ -378,7 +377,9 @@ export default function App() {
             </View>
             <View>
               <Text style={styles.metricCaption}>Transport</Text>
-              <Text style={styles.metricValue}>{state?.transport ?? '—'}</Text>
+              <Text style={[styles.metricValue, styles.metricTransportValue]}>
+                {state?.transport ?? '—'}
+              </Text>
             </View>
           </View>
         </View>
@@ -630,7 +631,6 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   content: { padding: 18, paddingBottom: 48, gap: 14 },
   header: { paddingVertical: 12 },
@@ -662,6 +662,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     marginTop: 3,
+  },
+  metricTransportValue: {
     textTransform: 'capitalize',
   },
   card: {
