@@ -1,97 +1,81 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# rn-network-quality example
 
-# Getting Started
+This React Native Community CLI app exercises the complete required feature set:
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+- live quality tier, source, and classifier reasons;
+- every native snapshot field;
+- a 60-sample bandwidth sparkline;
+- manual and automatic active probes;
+- monitoring throttle and classifier threshold presets;
+- one-shot snapshots and a 50-entry field-change log; and
+- optional Android phone-state permission for cellular generation.
 
-## Step 1: Start Metro
+## Run it
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
-
-To start the Metro dev server, run the following command from the root of your React Native project:
+From the repository root:
 
 ```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
+corepack yarn install --immutable
+corepack yarn example android
 ```
 
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+For iOS, install pods once after dependency or podspec changes:
 
 ```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
+cd example
 bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
+cd ios
 bundle exec pod install
+cd ../../
+corepack yarn example ios
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+The app uses React Native's New Architecture. Expo Go cannot load this native
+module; use this app or an Expo development build instead.
+
+## Simulate network conditions
+
+### Android emulator
+
+Open **Extended Controls → Cellular** to change the network type and signal
+strength. You can also use:
 
 ```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+adb emu network speed gsm
+adb emu network delay edge
+adb emu network speed full
+adb emu network delay none
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+Toggle airplane mode to exercise offline recovery. Enable Android Data Saver to
+observe `isConstrained`. Switch between Wi-Fi and cellular to verify transport
+changes and probe invalidation. A VPN can be used to verify `isVpn` while the
+underlying Wi-Fi or cellular transport remains the primary `transport` value.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+The **Grant phone state (optional)** button requests `READ_PHONE_STATE` from the
+example app only. Grant it while using cellular to demonstrate
+`cellularGeneration`; the library never declares or requests this permission.
 
-## Step 3: Modify your app
+### iOS simulator and devices
 
-Now that you have successfully run the app, let's make changes!
+Use **Network Link Conditioner** to apply latency, packet-loss, and bandwidth
+profiles. On a physical device it is available under **Settings → Developer**.
+For the simulator, install Network Link Conditioner from Xcode's Additional
+Tools package. Toggle airplane mode or Wi-Fi on a device, and enable Low Data
+Mode to observe `isConstrained`.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+iOS does not expose passive bandwidth, validation, captive-portal, VPN, roaming,
+or signal-strength values through `NWPathMonitor`; those rows correctly display
+“not available on this platform.” Run an active probe to populate RTT and
+downlink measurements.
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+## Useful manual checks
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+1. Start online and confirm exactly one initial event appears.
+2. Toggle airplane mode and confirm `offline`, then reconnect.
+3. Switch Wi-Fi/cellular and verify a prior probe no longer affects the tier.
+4. Background and foreground the app with auto-probe enabled.
+5. Change throttle and threshold presets while monitoring.
+6. Reload JavaScript and use Fast Refresh; events must not duplicate.
+7. Test a captive portal, Data Saver/Low Data Mode, VPN, and a deliberately slow
+   connection where available.
