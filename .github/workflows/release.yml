@@ -40,6 +40,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: true
           token: ${{ steps.release-token.outputs.token }}
       - name: Set up project
         uses: ./.github/actions/setup
@@ -47,6 +48,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org/
       - name: Upgrade npm for trusted publishing
         run: npm install --global npm@12.1.0
@@ -63,8 +65,18 @@ jobs:
       - name: Release from Conventional Commits
         env:
           GITHUB_TOKEN: ${{ steps.release-token.outputs.token }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [[ -n "${NPM_TOKEN:-}" ]]; then
+            export NODE_AUTH_TOKEN="$NPM_TOKEN"
+            echo 'Using the temporary NPM_TOKEN for npm authentication.'
+          else
+            unset NODE_AUTH_TOKEN
+            npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+            sed -i '/_authToken/d' "$npmrc"
+            echo 'Using npm trusted publishing through OIDC.'
+          fi
+
           increment='${{ inputs.increment }}'
           current_version="$(node -p "require('./package.json').version")"
           if ! git describe --tags --match 'v[0-9]*' --abbrev=0 >/dev/null 2>&1 && [[ "$increment" == 'auto' ]]; then
