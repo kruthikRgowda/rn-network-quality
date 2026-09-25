@@ -16,7 +16,7 @@ on:
           - prerelease
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 concurrency:
@@ -29,10 +29,18 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm
     steps:
+      - name: Generate release token
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
       - name: Check out full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          token: ${{ steps.release-token.outputs.token }}
       - name: Set up project
         uses: ./.github/actions/setup
       - name: Configure npm registry
@@ -54,7 +62,7 @@ jobs:
           git config user.email kruthikbr2@gmail.com
       - name: Release from Conventional Commits
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.release-token.outputs.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           increment='${{ inputs.increment }}'

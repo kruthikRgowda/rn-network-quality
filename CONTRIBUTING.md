@@ -23,8 +23,8 @@ New Architecture must be enabled.
 ## Set up the repository
 
 ```sh
-git clone https://github.com/kruthikRgowda/rn-network-quality-.git
-cd rn-network-quality-
+git clone https://github.com/kruthikRgowda/rn-network-quality
+cd rn-network-quality
 nvm use
 corepack enable
 yarn install --immutable
@@ -260,6 +260,42 @@ no-increment path and publishes the existing `0.1.0` version. After that first
 tag exists, `auto` derives the next version from Conventional Commits. A
 prerelease uses the `beta` prerelease name and npm dist-tag.
 
+### Protect `main` and allow release automation
+
+The Release workflow pushes its release commit and tag directly from `main`.
+Use a dedicated GitHub App as the only automation bypass instead of giving the
+default `GITHUB_TOKEN` or every administrator a broad exception:
+
+1. In your GitHub account, open **Settings → Developer settings → GitHub Apps →
+   New GitHub App**. Give the app a unique name such as
+   `rn-network-quality-release`, disable webhooks, and grant only the repository
+   **Contents: Read and write** permission.
+2. Install the app for **Only select repositories** and select
+   `kruthikRgowda/rn-network-quality`.
+3. Generate a private key. In the repository's **Settings → Secrets and
+   variables → Actions**, save the app's Client ID as the repository variable
+   `RELEASE_APP_CLIENT_ID` and the complete private key as the repository secret
+   `RELEASE_APP_PRIVATE_KEY`.
+4. Open **Settings → Rules → Rulesets → New branch ruleset**. Name it
+   `Protect main`, set enforcement to **Active**, and target the default branch
+   (`main`).
+5. In **Bypass list**, add only the installed release GitHub App and choose
+   **Always allow**. The release workflow uses this short-lived app token for
+   checkout, its release commit and tag push, and GitHub Release creation.
+6. Enable **Restrict deletions**, **Require a pull request before merging**, and
+   **Block force pushes**. Set required approvals to `0`; leave code-owner review
+   requirements off unless maintainers are added later.
+7. Enable **Require status checks to pass** and add all six CI job names exactly:
+   **Conventional PR title**, **Lint and typecheck**, **TypeScript tests**,
+   **Build and inspect package**, **Android example and JVM tests**, and
+   **iOS example**. Requiring branches to be up to date before merging is
+   recommended.
+
+Ordinary contributors and the default workflow token cannot bypass this
+ruleset. The release app can bypass it only because it is explicitly listed;
+keep that app installed only on this repository and do not reuse its private
+key elsewhere.
+
 ### First npm publication
 
 npm trusted publishing can only be configured after the npm package exists.
@@ -269,7 +305,7 @@ The initial `0.1.0` publication therefore requires a token:
 2. Create a short-expiry granular access token with **All Packages**, **Read and
    write (publish and stage)**, and **Bypass 2FA**. Revoke it immediately after
    the first publication.
-3. In `kruthikRgowda/rn-network-quality-`, create the GitHub Actions repository
+3. In `kruthikRgowda/rn-network-quality`, create the GitHub Actions repository
    secret `NPM_TOKEN` containing that token.
 4. From the `main` branch's Actions tab, run the **Release** workflow with the
    `auto` increment. With no existing `v*` tag, the workflow publishes the
@@ -285,7 +321,7 @@ After `rn-network-quality` exists on npm:
 
 1. Open the package's npm **Settings → Trusted Publisher** configuration.
 2. Choose GitHub Actions and set owner `kruthikRgowda`, repository
-   `rn-network-quality-`, workflow filename `release.yml`, and environment
+   `rn-network-quality`, workflow filename `release.yml`, and environment
    `npm`. These values must match the release job exactly.
 3. Set the allowed action to direct **`npm publish`**; the workflow does not use
    staged publishing.

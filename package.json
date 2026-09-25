@@ -64,14 +64,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kruthikRgowda/rn-network-quality-.git"
+    "url": "https://github.com/kruthikRgowda/rn-network-quality"
   },
   "author": "kruthik <kruthikbr2@gmail.com> (https://github.com/kruthikRgowda)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/kruthikRgowda/rn-network-quality-/issues"
+    "url": "https://github.com/kruthikRgowda/rn-network-quality/issues"
   },
-  "homepage": "https://github.com/kruthikRgowda/rn-network-quality-#readme",
+  "homepage": "https://github.com/kruthikRgowda/rn-network-quality",
   "sideEffects": false,
   "publishConfig": {
     "access": "public",
