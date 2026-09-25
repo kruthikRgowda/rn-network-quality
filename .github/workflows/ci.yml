@@ -74,8 +74,12 @@ jobs:
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           test -x "$SDKMANAGER"
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" 'cmdline-tools;latest'
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" 'platforms;android-37' 'build-tools;37.0.0'
+          "$SDKMANAGER" --list | grep 'platforms;android-3'
+          "$SDKMANAGER" 'platforms;android-37.0' 'build-tools;37.0.0'
       - name: Run Kotlin tests and assemble example
         working-directory: example/android
         run: ./gradlew :rn-network-quality:testDebugUnitTest :rn-network-quality:lintDebug :app:assembleDebug --no-daemon --console=plain
