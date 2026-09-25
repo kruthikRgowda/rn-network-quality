@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
 
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = {
-    :git => "https://github.com/kruthikRgowda/rn-network-quality-.git",
+    :git => "https://github.com/kruthikRgowda/rn-network-quality",
     :tag => "v#{s.version}"
   }
 

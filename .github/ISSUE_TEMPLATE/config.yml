@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability privately
-    url: https://github.com/kruthikRgowda/rn-network-quality-/security/advisories/new
+    url: https://github.com/kruthikRgowda/rn-network-quality/security/advisories/new
     about: Use a private GitHub Security Advisory instead of a public issue.
   - name: Ask a usage question
-    url: https://github.com/kruthikRgowda/rn-network-quality-/discussions
+    url: https://github.com/kruthikRgowda/rn-network-quality/discussions
     about: Use Discussions for integration help and questions that are not reproducible bugs.

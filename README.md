@@ -1,7 +1,7 @@
 # rn-network-quality
 
 [![npm version](https://img.shields.io/npm/v/rn-network-quality.svg)](https://www.npmjs.com/package/rn-network-quality)
-[![CI](https://github.com/kruthikRgowda/rn-network-quality-/actions/workflows/ci.yml/badge.svg)](https://github.com/kruthikRgowda/rn-network-quality-/actions/workflows/ci.yml)
+[![CI](https://github.com/kruthikRgowda/rn-network-quality/actions/workflows/ci.yml/badge.svg)](https://github.com/kruthikRgowda/rn-network-quality/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![React Native New Architecture](https://img.shields.io/badge/React%20Native-New%20Architecture-61dafb.svg)](https://reactnative.dev/architecture/landing-page)
 

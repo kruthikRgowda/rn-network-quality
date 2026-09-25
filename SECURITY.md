@@ -16,7 +16,7 @@ that may already be fixed.
 
 Do not open a public issue, discussion, or pull request for a suspected
 vulnerability. Use GitHub's
-[private vulnerability reporting form](https://github.com/kruthikRgowda/rn-network-quality-/security/advisories/new).
+[private vulnerability reporting form](https://github.com/kruthikRgowda/rn-network-quality/security/advisories/new).
 
 Include:
 
