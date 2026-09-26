@@ -15,8 +15,8 @@
     "react-native-safe-area-context": "^5.10.0"
   },
   "devDependencies": {
-    "@babel/core": "^8.0.6",
-    "@babel/preset-env": "^7.25.3",
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^8.0.6",
     "@babel/runtime": "^7.25.0",
     "@react-native-community/cli": "20.2.0",
     "@react-native-community/cli-platform-android": "20.2.0",
