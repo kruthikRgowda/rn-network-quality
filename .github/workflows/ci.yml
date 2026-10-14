@@ -35,7 +35,7 @@ jobs:
         uses: ./.github/actions/setup
       - run: yarn test --coverage --runInBand
       - name: Upload coverage
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: typescript-coverage
           path: coverage
@@ -67,7 +67,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
       - name: Install Android SDK 37
@@ -100,7 +100,7 @@ jobs:
         with:
           xcode-version: latest-stable
       - name: Set up Ruby and gems
-        uses: ruby/setup-ruby@762794c140bbeda0f1224786aa33b4b46783a6c1 # v1.326.0
+        uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           bundler-cache: true
           working-directory: example
